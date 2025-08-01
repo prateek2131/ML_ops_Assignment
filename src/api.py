@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime
 import logging
 import os
+from enum import Enum
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from fastapi.responses import Response
 import time
@@ -64,6 +65,29 @@ class HousingFeatures(BaseModel):
             raise ValueError('Average bedrooms cannot exceed average rooms')
         return v
 
+# Enhancement: ModelType enum
+class ModelType(str, Enum):
+    LINEAR = "linear_regression"
+    RANDOM_FOREST = "random_forest"
+    GRADIENT_BOOSTING = "gradient_boosting"
+    SVR = "support_vector_regression"
+
+# Enhancement: AdvancedPredictionRequest model
+class AdvancedPredictionRequest(BaseModel):
+    features: HousingFeatures
+    model_type: Optional[ModelType] = None
+    confidence_level: Optional[float] = Field(0.95, ge=0.8, le=0.99)
+    return_feature_importance: Optional[bool] = False
+    
+    @validator('features')
+    def validate_location(cls, v):
+        # Custom validation for California coordinates
+        if not (32.5 <= v.Latitude <= 42.0):
+            raise ValueError('Latitude must be within California bounds')
+        if not (-125.0 <= v.Longitude <= -114.0):
+            raise ValueError('Longitude must be within California bounds')
+        return v
+
 class PredictionRequest(BaseModel):
     features: HousingFeatures
     return_confidence: Optional[bool] = Field(False, description="Return prediction confidence interval")
@@ -77,6 +101,7 @@ class PredictionResponse(BaseModel):
     confidence_interval: Optional[Dict[str, float]] = None
     model_used: str
     timestamp: str
+    feature_importance: Optional[Dict[str, float]] = None  # Enhancement
 
 class BatchPredictionResponse(BaseModel):
     predictions: List[PredictionResponse]
@@ -92,6 +117,7 @@ class HealthResponse(BaseModel):
 model = None
 scaler = None
 model_metadata = None
+available_models = {}  # Enhancement: store multiple models
 
 def init_database():
     """Initialize SQLite database for logging"""
@@ -139,7 +165,7 @@ def log_prediction_to_db(input_data: dict, prediction: float, model_name: str, r
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application"""
-    global model, scaler, model_metadata
+    global model, scaler, model_metadata, available_models
     
     logger.info("Starting up the API...")
     
@@ -149,6 +175,21 @@ async def startup_event():
     # Load model and scaler
     model, scaler = load_model_and_scaler()
     model_metadata = load_model_metadata()
+    
+    # Enhancement: Load all required models for selection
+    # You can implement load_model_and_scaler to return a dict of models by type
+    # Example:
+    # available_models = {
+    #     ModelType.LINEAR: joblib.load('models/linear_regression.pkl'),
+    #     ModelType.RANDOM_FOREST: joblib.load('models/random_forest.pkl'),
+    #     ...
+    # }
+    available_models = {
+        ModelType.LINEAR: model,  # fallback: single model for demo
+        ModelType.RANDOM_FOREST: model,
+        ModelType.GRADIENT_BOOSTING: model,
+        ModelType.SVR: model
+    }
     
     if model is None or scaler is None:
         logger.error("Failed to load model or scaler")
@@ -252,6 +293,82 @@ async def predict(request: PredictionRequest):
     except Exception as e:
         ERROR_COUNT.labels(error_type="internal_error").inc()
         logger.error(f"Error in prediction: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# --- Enhancement: Advanced Prediction Endpoint ---
+@app.post("/predict/advanced", response_model=PredictionResponse)
+async def advanced_predict(request: AdvancedPredictionRequest):
+    """Advanced prediction endpoint with model selection, confidence level, and feature importance."""
+    start_time = time.time()
+    
+    try:
+        # Select model
+        selected_model_type = request.model_type or ModelType.LINEAR
+        selected_model = available_models.get(selected_model_type)
+        if selected_model is None or scaler is None:
+            ERROR_COUNT.labels(error_type="model_not_loaded").inc()
+            raise HTTPException(status_code=503, detail="Requested model not loaded")
+        
+        input_data = request.features.dict()
+        
+        # Validate input features
+        is_valid, message = validate_input_features(input_data)
+        if not is_valid:
+            ERROR_COUNT.labels(error_type="invalid_input").inc()
+            raise HTTPException(status_code=400, detail=message)
+        
+        # Preprocess input
+        processed_input = preprocess_input(input_data, scaler)
+        if processed_input is None:
+            ERROR_COUNT.labels(error_type="preprocessing_error").inc()
+            raise HTTPException(status_code=400, detail="Error preprocessing input")
+        
+        # Make prediction
+        prediction = selected_model.predict(processed_input)[0]
+        
+        # Calculate confidence interval based on request.confidence_level
+        confidence_interval = None
+        if request.confidence_level:
+            std_error = 0.1 * prediction  # Simplified error estimation
+            # z-score for the confidence level: for 95%, z=1.96, for 99%, z=2.58, for 80%, z=1.28
+            z_score = {0.8: 1.28, 0.95: 1.96, 0.99: 2.58}.get(round(request.confidence_level, 2), 1.96)
+            confidence_interval = {
+                "lower": float(prediction - z_score * std_error),
+                "upper": float(prediction + z_score * std_error)
+            }
+        
+        # Calculate feature importance if requested
+        feature_importance = None
+        if request.return_feature_importance:
+            # Many models have feature_importances_ or coef_
+            if hasattr(selected_model, 'feature_importances_'):
+                fi = selected_model.feature_importances_
+                feature_importance = {name: float(val) for name, val in zip(processed_input.columns, fi)}
+            elif hasattr(selected_model, 'coef_'):
+                fi = selected_model.coef_
+                feature_importance = {name: float(val) for name, val in zip(processed_input.columns, fi)}
+            else:
+                feature_importance = {"message": "Feature importance not available for selected model"}
+        
+        # Log prediction
+        response_time = time.time() - start_time
+        log_prediction_to_db(input_data, float(prediction), selected_model_type.value, response_time)
+        
+        PREDICTION_COUNT.inc()
+        
+        return PredictionResponse(
+            prediction=float(prediction),
+            confidence_interval=confidence_interval,
+            model_used=selected_model_type.value,
+            timestamp=datetime.now().isoformat(),
+            feature_importance=feature_importance
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        ERROR_COUNT.labels(error_type="internal_error").inc()
+        logger.error(f"Error in advanced prediction: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/predict/batch", response_model=BatchPredictionResponse)
@@ -374,3 +491,4 @@ async def get_metrics():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    logger.info("Starting FastAPI application")
