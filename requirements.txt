@@ -1,24 +1,23 @@
-scikit-learn~=1.7.1
-pandas~=2.3.1
-numpy~=2.3.2
-mlflow==3.1.0
-fastapi==0.101.0
+scikit-learn~=1.2.2       # 1.2.2 is the last version supporting Python 3.9
+pandas~=1.5.3             # 1.5.x is safe for Python 3.9
+numpy~=1.23.5             # Highest compatible with both pandas 1.5.x and Python 3.9
+mlflow==3.1.0             # Compatible with Python 3.9
+fastapi==0.101.0          # Still compatible with 3.9
 uvicorn==0.23.0
-pydantic==2.1.0
+pydantic==1.10.13         # pydantic v2 requires Python ≥3.10
 pytest==7.4.0
 flake8==6.0.0
-black==24.3.0
+black==23.3.0             # 24.x needs Python 3.10+
 dvc==3.12.0
 boto3==1.28.0
 python-multipart==0.0.19
 prometheus-client==0.17.0
 sqlite-utils==3.34.0
 requests==2.31.0
-Pillow==11.3.0
+Pillow==9.5.0             # v11+ needs Python ≥3.10
 matplotlib==3.7.2
 seaborn==0.12.2
 plotly==5.15.0
 gunicorn==23.0.0
 python-dotenv==1.0.0
-
-joblib~=1.5.1
+joblib~=1.2.0             # Compatible with scikit-learn 1.2.2 and Python 3.9

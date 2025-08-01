@@ -5,7 +5,7 @@ set -e
 echo "Setting up California Housing MLOps project..."
 
 # Create virtual environment
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 
 # Install dependencies
@@ -25,8 +25,8 @@ sleep 5
 
 # Generate data and train models
 echo "Generating data and training models..."
-python src/data_preprocessing.py
-python scripts/train_models.py
+python3 src/data_preprocessing.py
+python3 scripts/train_models.py
 
 # Build Docker image
 echo "Building Docker image..."
