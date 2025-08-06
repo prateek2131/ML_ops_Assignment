@@ -21,19 +21,23 @@ class DataPreprocessor:
         
     def load_data(self):
         """Load California Housing dataset"""
-        logger.info("Loading California Housing dataset...")
-        housing = fetch_california_housing()
-        
-        # Create DataFrame
-        df = pd.DataFrame(housing.data, columns=housing.feature_names)
-        df['target'] = housing.target
-        
-        # Save raw data
-        os.makedirs('data/raw', exist_ok=True)
-        df.to_csv('data/raw/california_housing_raw.csv', index=False)
-        logger.info("Raw data saved to data/raw/california_housing_raw.csv")
-        
-        return df
+        try:
+            logger.info("Loading California Housing dataset...")
+            housing = fetch_california_housing()
+            
+            # Create DataFrame
+            df = pd.DataFrame(housing.data, columns=housing.feature_names)
+            df['target'] = housing.target
+            
+            # Save raw data
+            os.makedirs('data/raw', exist_ok=True)
+            df.to_csv('data/raw/california_housing_raw.csv', index=False)
+            logger.info("Raw data saved to data/raw/california_housing_raw.csv")
+            
+            return df
+        except Exception as e:
+            logger.error(f"Error loading data: {str(e)}")
+            raise
     
     def preprocess_data(self, df, test_size=0.2, random_state=42):
         """Preprocess the dataset"""

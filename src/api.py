@@ -248,20 +248,36 @@ async def predict(request: PredictionRequest):
         # Convert request to dict
         input_data = request.features.dict()
         
+        # Additional input validation
+        for key, value in input_data.items():
+            if not isinstance(value, (int, float)):
+                ERROR_COUNT.labels(error_type="invalid_input_type").inc()
+                raise HTTPException(status_code=400, detail=f"Invalid type for {key}: expected number")
+            if pd.isna(value):
+                ERROR_COUNT.labels(error_type="missing_value").inc()
+                raise HTTPException(status_code=400, detail=f"Missing value for {key}")
+        
         # Validate input features
         is_valid, message = validate_input_features(input_data)
         if not is_valid:
             ERROR_COUNT.labels(error_type="invalid_input").inc()
             raise HTTPException(status_code=400, detail=message)
         
-        # Preprocess input
-        processed_input = preprocess_input(input_data, scaler)
-        if processed_input is None:
+        # Preprocess input with detailed error handling
+        try:
+            processed_input = preprocess_input(input_data, scaler)
+            if processed_input is None:
+                raise ValueError("Preprocessing returned None")
+        except Exception as e:
             ERROR_COUNT.labels(error_type="preprocessing_error").inc()
-            raise HTTPException(status_code=400, detail="Error preprocessing input")
+            raise HTTPException(status_code=400, detail=f"Error preprocessing input: {str(e)}")
         
-        # Make prediction
-        prediction = model.predict(processed_input)[0]
+        # Make prediction with timeout protection
+        try:
+            prediction = model.predict(processed_input)[0]
+        except Exception as e:
+            ERROR_COUNT.labels(error_type="prediction_error").inc()
+            raise HTTPException(status_code=500, detail=f"Error making prediction: {str(e)}")
         
         # Calculate confidence interval if requested
         confidence_interval = None

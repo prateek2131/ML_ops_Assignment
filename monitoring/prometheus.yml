@@ -13,7 +13,7 @@ scrape_configs:
 
   - job_name: 'california-housing-api'
     static_configs:
-      - targets: ['api:8000']
+      - targets: ['host.docker.internal:8000']
     metrics_path: '/metrics'
     scrape_interval: 5s
     scrape_timeout: 5s

@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_PORT}:8000"
     volumes:
       - ./models:/app/models
       - ./logs:/app/logs
@@ -23,18 +23,18 @@ services:
   mlflow:
     image: python:3.9-slim
     ports:
-      - "${MLFLOW_PORT:-5002}:${MLFLOW_PORT:-5002}"
+      - "${MLFLOW_PORT}:5002"
     volumes:
       - ./mlruns:/mlruns
     command: >
       sh -c "pip install mlflow && 
-             mlflow server --host 0.0.0.0 --port ${MLFLOW_PORT:-5002} --backend-store-uri file:///mlruns"
+             mlflow server --host 0.0.0.0 --port 5002 --backend-store-uri file:///mlruns"
     restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${PROMETHEUS_PORT}:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
     command:
@@ -47,7 +47,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${GRAFANA_PORT}:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:

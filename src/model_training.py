@@ -186,22 +186,41 @@ class ModelTrainer:
         """Train all models and compare performance"""
         logger.info("Starting model training pipeline...")
         
-        # Load data
-        X_train, X_test, y_train, y_test = self.load_data()
-        
-        # Load parameters
-        model_params = self.load_params()
-        
-        # Train all models
-        self.train_linear_regression(X_train, y_train, X_test, y_test, model_params['linear_regression'])
-        self.train_random_forest(X_train, y_train, X_test, y_test, model_params['random_forest'])
-        self.train_gradient_boosting(X_train, y_train, X_test, y_test, model_params['gradient_boosting'])
-        self.train_svr(X_train, y_train, X_test, y_test, model_params['svr'])
-        
-        # Find best model
-        best_model_name = min(self.results.keys(), key=lambda x: self.results[x]['rmse'])
-        best_model = self.models[best_model_name]
-        best_metrics = self.results[best_model_name]
+        try:
+            # Load data
+            X_train, X_test, y_train, y_test = self.load_data()
+            
+            # Load parameters
+            model_params = self.load_params()
+            
+            # Train all models with error handling
+            model_types = {
+                'linear_regression': self.train_linear_regression,
+                'random_forest': self.train_random_forest,
+                'gradient_boosting': self.train_gradient_boosting,
+                'svr': self.train_svr
+            }
+            
+            for model_name, train_func in model_types.items():
+                try:
+                    train_func(X_train, y_train, X_test, y_test, model_params[model_name])
+                except Exception as e:
+                    logger.error(f"Error training {model_name}: {str(e)}")
+                    # Continue with other models even if one fails
+                    continue
+            
+            if not self.results:
+                raise RuntimeError("No models were successfully trained")
+            
+            # Find best model
+            best_model_name = min(self.results.keys(), key=lambda x: self.results[x]['rmse'])
+            best_model = self.models[best_model_name]
+            best_metrics = self.results[best_model_name]
+            return best_model, best_model_name, best_metrics
+            
+        except Exception as e:
+            logger.error(f"Error in model training pipeline: {str(e)}")
+            raise
         
         logger.info(f"Best model: {best_model_name} with RMSE: {best_metrics['rmse']:.4f}")
         
