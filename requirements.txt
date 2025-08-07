@@ -1,23 +1,36 @@
-scikit-learn~=1.2.2       # 1.2.2 is the last version supporting Python 3.9
-pandas~=1.5.3             # 1.5.x is safe for Python 3.9
-numpy~=1.23.5             # Highest compatible with both pandas 1.5.x and Python 3.9
-mlflow==3.1.0             # Compatible with Python 3.9
-fastapi==0.101.0          # Still compatible with 3.9
+# Core ML and Data Science
+scikit-learn~=1.2.2       # Last version supporting Python 3.9
+pandas~=1.5.3             # Safe for Python 3.9
+numpy~=1.23.5             # Compatible with pandas 1.5.x and Python 3.9
+joblib~=1.2.0             # Compatible with scikit-learn 1.2.2
+
+# API and Web
+fastapi==0.68.2           # Known working version with starlette 0.14.2
+starlette==0.14.2         # Required by FastAPI 0.68.2
 uvicorn==0.23.0
-pydantic==1.10.13         # pydantic v2 requires Python ≥3.10
-pytest==7.4.0
-flake8==6.0.0
-black==23.3.0             # 24.x needs Python 3.10+
-dvc==3.12.0
-boto3==1.28.0
-python-multipart==0.0.19
-prometheus-client==0.17.0
-sqlite-utils==3.34.0
-requests==2.31.0
-Pillow==9.5.0             
+pydantic==1.10.13         # Last v1 version, v2 requires Python ≥3.10
+python-multipart==0.0.19  # For form data handling
+requests==2.31.0          # For API testing and HTTP requests
+gunicorn==23.0.0          # Production WSGI server
+
+# MLOps and Monitoring
+mlflow==3.1.0             # Compatible with Python 3.9
+dvc==3.12.0              # For data version control
+prometheus-client==0.17.0 # For metrics collection
+python-dotenv==1.0.0     # Environment variable management
+
+# Testing and Development
+pytest==7.4.0            # Known working version
+pytest-asyncio==0.23.8   # Compatible with pytest 7.4.0
+flake8==6.0.0           # Code linting
+black==23.3.0           # Code formatting (24.x needs Python 3.10+)
+
+# Cloud and Storage
+boto3==1.28.0           # AWS SDK
+sqlite-utils==3.34.0    # SQLite database management
+
+# Visualization
 matplotlib==3.7.2
 seaborn==0.12.2
 plotly==5.15.0
-gunicorn==23.0.0
-python-dotenv==1.0.0
-joblib~=1.2.0             # Compatible with scikit-learn 1.2.2 and Python 3.9
+Pillow==9.5.0          # Image processing

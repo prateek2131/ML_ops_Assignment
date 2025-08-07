@@ -65,16 +65,13 @@ class TestFullPipeline:
         self.test_model_training_pipeline()
         
         # Start API server
-        import uvicorn
-        from src.api import app
-        
-        def run_server():
-            uvicorn.run(app, host="127.0.0.1", port=8001, log_level="error")
-        
-        self.api_process = Process(target=run_server)
-        self.api_process.start()
-        
-        # Wait for server to start
+        self.api_process = subprocess.Popen(
+            ['uvicorn', 'src.api:app', '--host', '127.0.0.1', '--port', '8001', '--log-level', 'error'],
+            cwd=os.getcwd(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        # Give server time to start
         time.sleep(5)
         
         # Test API endpoints

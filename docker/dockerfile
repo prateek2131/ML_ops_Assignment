@@ -1,4 +1,6 @@
-FROM python:3.9-slim
+FROM python:3.9.6-slim
+
+LABEL maintainer="prateek2131"
 
 WORKDIR /app
 
@@ -14,7 +16,9 @@ RUN chown -R appuser:appuser /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    # Ensure specific FastAPI and Starlette versions
+    pip install --no-cache-dir "fastapi==0.68.2" "starlette==0.14.2"
 
 # Copy application code
 COPY . .

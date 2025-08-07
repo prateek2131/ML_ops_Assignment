@@ -3,15 +3,59 @@ from fastapi.testclient import TestClient
 import json
 import os
 import sys
+import joblib
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from src.api import app
 
+# Create dummy model and scaler for testing
+def setup_test_model():
+    os.makedirs('models', exist_ok=True)
+    
+    # Create a simple model
+    model = RandomForestRegressor(n_estimators=1)
+    X = np.random.rand(100, 8)  # 8 features
+    y = np.random.rand(100)
+    model.fit(X, y)
+    
+    # Create a scaler
+    scaler = StandardScaler()
+    scaler.fit(X)
+    
+    # Save model and scaler
+    joblib.dump(model, 'models/best_model.joblib')
+    joblib.dump(scaler, 'models/scaler.joblib')
+    
+    # Save metadata
+    with open('models/model_metadata.json', 'w') as f:
+        json.dump({
+            'best_model': 'random_forest',
+            'timestamp': '2025-08-07',
+            'metrics': {'mse': 0.1}
+        }, f)
+
+# Setup test model before running tests
+setup_test_model()
+
+# Initialize the app before creating test client
+from src.api import startup_event
+import asyncio
+asyncio.run(startup_event())
+
+# Create test client
 client = TestClient(app)
 
 class TestAPI:
+    @classmethod
+    def setup_class(cls):
+        """Setup for all tests"""
+        # Ensure we're in the correct directory
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
     def test_root_endpoint(self):
         """Test root endpoint"""
