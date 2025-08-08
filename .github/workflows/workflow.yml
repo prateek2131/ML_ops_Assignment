@@ -123,7 +123,7 @@ jobs:
       uses: docker/build-push-action@v4
       with:
         context: .
-        file: ./docker/Dockerfile
+        file: ./Dockerfile
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
@@ -138,12 +138,11 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    - name: Deploy to staging
+    - name: Deploy to production
       run: |
-        echo "Deploying to staging environment..."
-        # Add your deployment script here
+        echo "Deploying to production environment..."
         chmod +x scripts/deploy.sh
-        ./scripts/deploy.sh staging
+        ./scripts/deploy.sh production
     
     - name: Run integration tests
       run: |
@@ -152,12 +151,6 @@ jobs:
         sleep 30
         # Run integration tests
         python tests/integration_tests.py
-    
-    - name: Deploy to production
-      if: success()
-      run: |
-        echo "Deploying to production environment..."
-        ./scripts/deploy.sh production
 
   model-validation:
     runs-on: ubuntu-latest

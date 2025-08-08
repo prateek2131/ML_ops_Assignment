@@ -53,9 +53,8 @@ This project implements a production-grade machine learning pipeline for Califor
   - System resources
 
 ### 5. Deployment Configuration
-- **Environments**:
-  - Staging (ports: 8000, 5002, 9090, 3000)
-  - Production (ports: 9000, 5003, 9091, 3001)
+- **Environment**:
+  - Production (ports: 8000, 5001, 9090, 3000)
 - **Docker Configuration**:
   - Multi-service orchestration
   - Environment-specific settings
@@ -97,7 +96,7 @@ ML_ops_Assignment/
 
 ## Scalability Considerations
 - Containerized deployment
-- Separate staging/production environments
+- Production environment management
 - Resource monitoring
 - Performance optimization
 - Batch prediction support

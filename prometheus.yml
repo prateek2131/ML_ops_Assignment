@@ -18,6 +18,21 @@ scrape_configs:
     scrape_interval: 5s
     scrape_timeout: 5s
 
+  - job_name: 'mlflow'
+    static_configs:
+      - targets: ['mlflow:5002']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    scheme: http
+    honor_labels: true
+    scrape_offset: 2s
+    metrics_path: '/metrics'
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '^mlflow_.*'
+        action: keep
+
   - job_name: 'node-exporter'
     static_configs:
       - targets: ['node-exporter:9100']

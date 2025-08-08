@@ -66,7 +66,7 @@ class TestFullPipeline:
         
         # Start API server
         self.api_process = subprocess.Popen(
-            ['uvicorn', 'src.api:app', '--host', '127.0.0.1', '--port', '8001', '--log-level', 'error'],
+            ['uvicorn', 'src.api:app', '--host', '127.0.0.1', '--port', '8000', '--log-level', 'error'],
             cwd=os.getcwd(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
@@ -75,7 +75,7 @@ class TestFullPipeline:
         time.sleep(5)
         
         # Test API endpoints
-        base_url = "http://127.0.0.1:8001"
+        base_url = "http://127.0.0.1:8000"
         
         # Health check
         response = requests.get(f"{base_url}/health")
@@ -110,7 +110,7 @@ class TestFullPipeline:
         # Build Docker image
         result = subprocess.run([
             'docker', 'build', '-t', 'test-housing-api', 
-            '-f', 'docker/Dockerfile', '.'
+            '-f', 'Dockerfile', '.'
         ], capture_output=True, text=True)
         
         assert result.returncode == 0
@@ -118,14 +118,14 @@ class TestFullPipeline:
         # Test container run (quick test)
         result = subprocess.run([
             'docker', 'run', '--rm', '-d', '--name', 'test-container',
-            '-p', '8002:8000', 'test-housing-api'
+            '-p', '8000:8000', 'test-housing-api'
         ], capture_output=True, text=True)
         
         if result.returncode == 0:
             time.sleep(10)  # Wait for container to start
             
             try:
-                response = requests.get("http://localhost:8002/health", timeout=5)
+                response = requests.get("http://localhost:800/health", timeout=5)
                 assert response.status_code == 200
             except requests.exceptions.RequestException:
                 pytest.skip("Docker container health check failed")

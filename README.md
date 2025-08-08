@@ -1,6 +1,6 @@
 # California Housing MLOps Project
 
-This project implements an end-to-end MLOps pipeline for the California Housing dataset, including model training, monitoring, and deployment with separate staging and production environments.
+This project implements an end-to-end MLOps pipeline for the California Housing dataset, including model training, monitoring, and deployment in a production environment.
 
 ## Project Structure
 
@@ -97,20 +97,6 @@ ML_ops_Assignment/
    - MLflow: http://localhost:5002
    - Prometheus: http://localhost:9090
    - Grafana: http://localhost:3000
-
-### Staging Environment
-
-1. **Deploy to Staging**
-   ```bash
-   export DOCKER_USERNAME=your_username
-   ./scripts/deploy.sh staging v1.0
-   ```
-
-   Staging Environment Ports:
-   - API: 8001
-   - MLflow: 5002
-   - Prometheus: 9091
-   - Grafana: 3001
 
 ### Production Environment
 

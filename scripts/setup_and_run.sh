@@ -111,26 +111,17 @@ deploy_services() {
     local env=$1
     local version=$2
     
-    if [ -z "$DOCKER_USERNAME" ]; then
-        log_error "DOCKER_USERNAME environment variable is not set"
-        exit 1
-    fi
-    
     log_info "Deploying to $env environment..."
     
-    # Load environment variables based on environment
-    if [ "$env" == "production" ]; then
+    # Load environment variables
+    if [ -f ".env.production" ]; then
         set -a
-        source <(grep -v '^#' docker/.env.production)
-        set +a
-    else
-        set -a
-        source <(grep -v '^#' docker/.env.staging)
+        source <(grep -v '^#' .env.production)
         set +a
     fi
     
-    # Run the deployment script
-    ./scripts/deploy.sh $env $version
+    # Use production compose file for deployment
+    docker-compose -f docker-compose.yml up -d
     
     # Wait for services to be ready
     sleep 30
@@ -148,7 +139,7 @@ setup_auto_training() {
     
     # Set up cron job for auto-training if it doesn't exist
     if ! crontab -l | grep -q "auto_train.py"; then
-        (crontab -l 2>/dev/null; echo "0 0 * * * cd $(pwd) && ./venv/bin/python scripts/auto_train.py") | crontab -
+        (crontab -l 2>/dev/null; echo "0 0 * * * cd $(pwd) && docker-compose exec -T api python scripts/auto_train.py") | crontab -
         log_info "Added auto-training cron job"
     fi
 }
@@ -157,71 +148,39 @@ main() {
     # Ensure we're in the project root directory
     cd "$(dirname "$0")/.."
     
-    log_info "Starting setup process..."
+    log_info "Starting setup and deployment process..."
     
-    # Check requirements first
-    check_requirements
+    # Run initial setup
+    ./scripts/setup.sh
     
-    # Setup Python environment
-    setup_python_env
-    
-    # Preprocess data
-    preprocess_data
-    
-    # Train initial model
-    train_model
-    
-    # Ensure model directory exists and has required files
-    log_info "Checking model files..."
-    if [ ! -f "models/best_model.joblib" ] || [ ! -f "models/scaler.joblib" ] || [ ! -f "models/model_metadata.json" ]; then
-        log_info "Model files missing, training new model..."
-        python scripts/train_models.py
-        sleep 2  # Wait for files to be saved
-    fi
-    
+    # Ensure test dependencies are installed
+    log_info "Installing test dependencies..."
+    source venv/bin/activate
+    pip install "pytest==7.4.0" \
+                "pytest-asyncio==0.23.8" \
+                "pytest-cov" \
+                "python-multipart==0.0.19"
+
     # Run tests with increased verbosity and proper environment
     log_info "Running tests..."
-    PYTHONPATH=. pytest -v tests/ --log-cli-level=INFO
+    PYTHONPATH=. venv/bin/pytest -v tests/ --log-cli-level=INFO
     
     # Setup monitoring
     setup_monitoring
     
-    # Export Docker username for deployment
-    read -p "Enter your Docker username: " docker_username
-    export DOCKER_USERNAME=$docker_username
-    
-    # Deploy to staging first
-    log_info "Deploying to staging environment..."
-    deploy_services staging v1.0
-    
-    # Ask for production deployment
-    read -p "Do you want to deploy to production? (y/n) " deploy_prod
-    if [[ $deploy_prod == "y" ]]; then
-        log_info "Deploying to production environment..."
-        deploy_services production v1.0
-    fi
+    # Deploy to production using Docker Compose
+    log_info "Deploying to production environment..."
+    deploy_services production v1.0
     
     # Setup auto-training
     setup_auto_training
     
-    log_info "Setup completed successfully!"
-    log_info "Services are running at:"
-    if [ "$env" == "production" ]; then
-        log_info "- API: http://localhost:9000"
-        log_info "- MLflow: http://localhost:5003"
-        log_info "- Prometheus: http://localhost:9091"
-        log_info "- Grafana: http://localhost:3001 (admin/admin)"
-    else
-        log_info "- API: http://localhost:8000"
-        log_info "- MLflow: http://localhost:5002"
-        log_info "- Prometheus: http://localhost:9090"
-        log_info "- Grafana: http://localhost:3000 (admin/admin)"
-    fi
-    
+    log_info "Setup and deployment completed successfully!"
     log_warn "Don't forget to:"
     log_warn "1. Change the Grafana admin password"
     log_warn "2. Set up your backup strategy"
     log_warn "3. Review monitoring alerts in Grafana"
+    log_warn "4. Check MLflow experiments at http://localhost:5001"
 }
 
 # Run main function

@@ -4,7 +4,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: docker/Dockerfile
+      dockerfile: Dockerfile
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -21,15 +21,21 @@ services:
     restart: unless-stopped
 
   mlflow:
-    image: python:3.9-slim
+    build:
+      context: .
+      dockerfile: dockerfile
     ports:
-      - "${MLFLOW_PORT:-5002}:${MLFLOW_PORT:-5002}"
+      - "5001:5000"  # MLflow UI (http://localhost:5001/#/models for Models view)
     volumes:
       - ./mlruns:/mlruns
+      - ./mlartifacts:/mlartifacts
+    environment:
+      - BACKEND_STORE_URI=sqlite:///mlflow.db
+      - DEFAULT_ARTIFACT_ROOT=./mlartifacts
     command: >
-      sh -c "pip install mlflow && 
-             mlflow server --host 0.0.0.0 --port ${MLFLOW_PORT:-5002} --backend-store-uri file:///mlruns"
-    restart: unless-stopped
+      sh -c "apt-get update && apt-get -y install curl &&
+             pip install mlflow==2.8.1 psycopg2-binary &&
+             gunicorn --bind 0.0.0.0:5000 --timeout 120 --workers 4 --access-logfile - --worker-class gthread mlflow.server:app"
 
   prometheus:
     image: prom/prometheus:latest
@@ -44,15 +50,33 @@ services:
       - '--web.console.templates=/etc/prometheus/consoles'
     restart: unless-stopped
 
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+
   grafana:
     image: grafana/grafana:latest
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/dashboard.json
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./monitoring/grafana_dashboard.json:/etc/grafana/provisioning/dashboards/dashboard.json
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
 volumes:

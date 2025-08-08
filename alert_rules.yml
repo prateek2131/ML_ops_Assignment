@@ -1,0 +1,30 @@
+groups:
+- name: california_housing_api
+  rules:
+  - alert: APIHighErrorRate
+    expr: rate(api_errors_total[5m]) > 0.1
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High error rate detected"
+      description: "API error rate is {{ $value }} errors per second"
+  
+  - alert: APIHighLatency
+    expr: histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m])) > 1
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High API latency detected"
+      description: "95th percentile latency is {{ $value }} seconds"
+  
+  - alert: APIDown
+    expr: up{job="california-housing-api"} == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "API is down"
+      description: "California Housing API is not responding"
+
