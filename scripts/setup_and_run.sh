@@ -121,14 +121,14 @@ deploy_services() {
     fi
     
     # Use production compose file for deployment
-    docker-compose -f docker-compose.yml up -d
+    docker-compose -f docker-compose.production.yml up -d
     
     # Wait for services to be ready
     sleep 30
     
     # Check if services are running
     log_info "Checking service health..."
-    curl -f http://localhost:8000/health || {
+    curl -f http://localhost:8001/health || {
         log_error "API service is not healthy"
         exit 1
     }
@@ -180,7 +180,7 @@ main() {
     log_warn "1. Change the Grafana admin password"
     log_warn "2. Set up your backup strategy"
     log_warn "3. Review monitoring alerts in Grafana"
-    log_warn "4. Check MLflow experiments at http://localhost:5001"
+    log_warn "4. Check MLflow experiments at http://localhost:5002"
 }
 
 # Run main function
