@@ -122,34 +122,95 @@ sleep 30
 
 # Health check
 log_info "Performing health checks..."
+log_info "Checking if port ${API_PORT} is available..."
+
+# Check if port is in use
+if netstat -ln 2>/dev/null | grep ":${API_PORT} " > /dev/null; then
+log_info "Port ${API_PORT} is in use"
+else
+log_warn "Port ${API_PORT} does not appear to be in use"
+fi
+
+# Check container status before health checks
+log_info "Container status before health checks:"
+${DOCKER_COMPOSE_CMD} ps
+
 for i in {1..10}; do
-HEALTH_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}" http://localhost:${API_PORT}/health 2>&1)
+log_info "Health check attempt ${i}/10..."
+
+# More detailed curl with connection info
+HEALTH_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}|TIME_TOTAL:%{time_total}|TIME_CONNECT:%{time_connect}" \
+  --connect-timeout 5 \
+  --max-time 30 \
+  http://localhost:${API_PORT}/health 2>&1)
+
 HTTP_CODE=$(echo "$HEALTH_RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
+TIME_TOTAL=$(echo "$HEALTH_RESPONSE" | grep -o "TIME_TOTAL:[0-9.]*" | cut -d: -f2)
+TIME_CONNECT=$(echo "$HEALTH_RESPONSE" | grep -o "TIME_CONNECT:[0-9.]*" | cut -d: -f2)
+RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed 's/HTTP_CODE:[0-9]*|TIME_TOTAL:[0-9.]*|TIME_CONNECT:[0-9.]*$//')
 
 if [ "$HTTP_CODE" = "200" ]; then
 log_info "API is healthy!"
+log_info "  Response time: ${TIME_TOTAL}s"
+log_info "  Response: ${RESPONSE_BODY}"
 break
 else
 if [ ${i} -eq 10 ]; then
-log_error "API failed to become healthy after 10 attempts"
+log_error "========================================="
+log_error "API HEALTH CHECK FAILED - DEBUGGING INFO"
+log_error "========================================="
 log_error "Final health check details:"
 log_error "  HTTP Status Code: ${HTTP_CODE:-'Connection failed'}"
+log_error "  Connection Time: ${TIME_CONNECT:-'N/A'}s"
+log_error "  Total Time: ${TIME_TOTAL:-'N/A'}s"
 log_error "  Response Body: ${RESPONSE_BODY}"
 log_error "  URL: http://localhost:${API_PORT}/health"
+echo ""
 
-# Additional debugging - check if containers are running
+# Check if curl had connection issues
+if echo "$HEALTH_RESPONSE" | grep -q "Connection refused"; then
+log_error "DIAGNOSIS: Connection refused - service not listening on port ${API_PORT}"
+elif echo "$HEALTH_RESPONSE" | grep -q "timeout"; then
+log_error "DIAGNOSIS: Request timeout - service may be overloaded or hung"
+elif [ -z "$HTTP_CODE" ]; then
+log_error "DIAGNOSIS: No HTTP response - check if service is running"
+elif [ "$HTTP_CODE" != "200" ]; then
+log_error "DIAGNOSIS: Service responding but returning error status ${HTTP_CODE}"
+fi
+echo ""
+
+# Container status debugging
 log_error "Container status:"
 ${DOCKER_COMPOSE_CMD} ps || true
+echo ""
 
-# Check container logs
+# Check container logs for all services
 log_error "Recent container logs:"
-${DOCKER_COMPOSE_CMD} logs --tail=20 || true
+for service in $(${DOCKER_COMPOSE_CMD} config --services 2>/dev/null || echo "api"); do
+log_error "--- Logs for service: ${service} ---"
+${DOCKER_COMPOSE_CMD} logs --tail=10 ${service} 2>/dev/null || true
+echo ""
+done
+
+# Network and port debugging
+log_error "Network debugging:"
+log_error "Active connections on port ${API_PORT}:"
+netstat -ln 2>/dev/null | grep ":${API_PORT} " || log_error "No connections found on port ${API_PORT}"
+log_error "Docker networks:"
+docker network ls || true
+
+# Resource usage
+log_error "System resources:"
+docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null || true
 
 exit 1
 else
 log_warn "Waiting for API to be ready... (attempt ${i}/10)"
-log_warn "  HTTP Status: ${HTTP_CODE:-'Connection failed'}, Response: ${RESPONSE_BODY}"
+log_warn "  HTTP Status: ${HTTP_CODE:-'Connection failed'}"
+log_warn "  Connection Time: ${TIME_CONNECT:-'N/A'}s"
+if [ -n "$RESPONSE_BODY" ] && [ ${#RESPONSE_BODY} -lt 200 ]; then
+log_warn "  Response: ${RESPONSE_BODY}"
+fi
 fi
 sleep 10
 fi
