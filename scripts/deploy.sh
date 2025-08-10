@@ -133,7 +133,59 @@ fi
 
 # Check container status before health checks
 log_info "Container status before health checks:"
-${DOCKER_COMPOSE_CMD} ps
+CONTAINER_STATUS=$(${DOCKER_COMPOSE_CMD} ps)
+echo "$CONTAINER_STATUS"
+
+# Check if API container is restarting or has issues
+if echo "$CONTAINER_STATUS" | grep -q "Restarting\|Exited\|Exit"; then
+log_error "========================================="
+log_error "API CONTAINER ISSUE DETECTED"
+log_error "========================================="
+log_error "The API container is not running properly."
+echo ""
+
+# Get the API service name dynamically
+API_SERVICE=$(echo "$CONTAINER_STATUS" | grep "api" | awk '{print $1}' | head -1)
+if [ -z "$API_SERVICE" ]; then
+API_SERVICE="api"  # fallback
+fi
+
+log_error "Recent logs from API container (${API_SERVICE}):"
+${DOCKER_COMPOSE_CMD} logs --tail=100 ${API_SERVICE} || true
+echo ""
+
+log_error "Checking for common API startup issues..."
+
+# Check if required files exist in container
+log_error "Verifying file structure in container:"
+docker exec "${API_SERVICE}" ls -la /app/ 2>/dev/null || log_error "Cannot access container filesystem"
+docker exec "${API_SERVICE}" ls -la /app/src/ 2>/dev/null || log_error "src/ directory not found in container"
+docker exec "${API_SERVICE}" ls -la /app/models/ 2>/dev/null || log_error "models/ directory not found in container"
+docker exec "${API_SERVICE}" ls -la /app/logs/ 2>/dev/null || log_error "logs/ directory not found in container"
+
+# Check Python dependencies
+log_error "Checking Python environment in container:"
+docker exec "${API_SERVICE}" python3 -c "import sys; print('Python version:', sys.version)" 2>/dev/null || log_error "Python not accessible in container"
+docker exec "${API_SERVICE}" python3 -c "import fastapi, pydantic, joblib, numpy, pandas, prometheus_client; print('Core dependencies OK')" 2>/dev/null || log_error "Missing Python dependencies"
+
+# Check if utils module can be imported
+docker exec "${API_SERVICE}" python3 -c "from src.utils import load_model_and_scaler; print('Utils import OK')" 2>/dev/null || log_error "Cannot import src.utils - check if file exists and has correct functions"
+
+log_error "========================================="
+log_error "COMMON SOLUTIONS:"
+log_error "1. Check that all required files are copied to the container"
+log_error "2. Verify src/utils.py exists and contains required functions:"
+log_error "   - load_model_and_scaler()"
+log_error "   - load_model_metadata()"
+log_error "   - preprocess_input()"
+log_error "   - validate_input_features()"
+log_error "   - create_prediction_log()"
+log_error "3. Check that models/ directory contains trained models"
+log_error "4. Verify all Python dependencies are in requirements.txt"
+log_error "5. Check file permissions in the container"
+log_error "========================================="
+exit 1
+fi
 
 for i in {1..10}; do
 log_info "Health check attempt ${i}/10..."
