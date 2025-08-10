@@ -6,6 +6,9 @@ import mlflow.sklearn
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.svm import SVR
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.datasets import fetch_california_housing
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import logging
 import yaml
@@ -23,6 +26,7 @@ class ModelTrainer:
         self.experiment_name = experiment_name
         self.models = {}
         self.results = {}
+        self.scaler = None  # Add scaler attribute
         
         # Set up MLflow
         mlflow.set_experiment(experiment_name)
@@ -36,51 +40,114 @@ class ModelTrainer:
             except Exception as e:
                 logger.error(f"Error in MLflow run {run_name}: {str(e)}")
                 raise
+    
+    def load_and_preprocess_data(self):
+        """Load raw data and preprocess it with scaling"""
+        logger.info("Loading and preprocessing California Housing dataset...")
+        
+        try:
+            # Load the dataset
+            housing = fetch_california_housing()
+            X = pd.DataFrame(housing.data, columns=housing.feature_names)
+            y = pd.Series(housing.target, name='target')
+            
+            logger.info(f"Dataset loaded - Shape: {X.shape}")
+            
+            # Split the data
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42
+            )
+            
+            # Initialize and fit the scaler
+            logger.info("Fitting StandardScaler...")
+            self.scaler = StandardScaler()
+            X_train_scaled = self.scaler.fit_transform(X_train)
+            X_test_scaled = self.scaler.transform(X_test)
+            
+            # Convert back to DataFrames
+            X_train_scaled = pd.DataFrame(X_train_scaled, columns=X.columns)
+            X_test_scaled = pd.DataFrame(X_test_scaled, columns=X.columns)
+            
+            # Create processed directory and save data for future use
+            os.makedirs('data/processed', exist_ok=True)
+            train_data = X_train_scaled.copy()
+            train_data['target'] = y_train.values
+            test_data = X_test_scaled.copy()
+            test_data['target'] = y_test.values
+            
+            train_data.to_csv('data/processed/train_data.csv', index=False)
+            test_data.to_csv('data/processed/test_data.csv', index=False)
+            logger.info("Saved preprocessed data")
+            
+            logger.info(f"Data preprocessed successfully - Train: {X_train_scaled.shape}, Test: {X_test_scaled.shape}")
+            return X_train_scaled, X_test_scaled, y_train, y_test
+            
+        except Exception as e:
+            logger.error(f"Error loading and preprocessing data: {str(e)}")
+            raise
         
     def load_data(self):
-        """Load preprocessed data with error handling"""
-        logger.info("Loading preprocessed data...")
+        """Load preprocessed data with error handling - fallback method"""
+        logger.info("Attempting to load preprocessed data...")
         logger.info(f"Current directory: {os.getcwd()}")
         
         try:
             train_data_path = './data/processed/train_data.csv'
             test_data_path = './data/processed/test_data.csv'
+            scaler_path = './models/scaler.joblib'
             
-            if not os.path.exists(train_data_path):
-                raise FileNotFoundError(f"Training data not found at {train_data_path}")
-            if not os.path.exists(test_data_path):
-                raise FileNotFoundError(f"Test data not found at {test_data_path}")
+            # Check if preprocessed data and scaler exist
+            if (os.path.exists(train_data_path) and 
+                os.path.exists(test_data_path) and 
+                os.path.exists(scaler_path)):
                 
-            train_data = pd.read_csv(train_data_path)
-            test_data = pd.read_csv(test_data_path)
-            
-            if 'target' not in train_data.columns or 'target' not in test_data.columns:
-                raise ValueError("'target' column not found in data files")
-            
-            X_train = train_data.drop('target', axis=1)
-            y_train = train_data['target']
-            X_test = test_data.drop('target', axis=1)
-            y_test = test_data['target']
-            
-            logger.info(f"Data loaded successfully - Train: {X_train.shape}, Test: {X_test.shape}")
-            return X_train, X_test, y_train, y_test
+                # Load preprocessed data
+                train_data = pd.read_csv(train_data_path)
+                test_data = pd.read_csv(test_data_path)
+                
+                if 'target' not in train_data.columns or 'target' not in test_data.columns:
+                    raise ValueError("'target' column not found in data files")
+                
+                X_train = train_data.drop('target', axis=1)
+                y_train = train_data['target']
+                X_test = test_data.drop('target', axis=1)
+                y_test = test_data['target']
+                
+                # Load existing scaler
+                self.scaler = joblib.load(scaler_path)
+                logger.info("Loaded existing scaler")
+                
+                logger.info(f"Preprocessed data loaded successfully - Train: {X_train.shape}, Test: {X_test.shape}")
+                return X_train, X_test, y_train, y_test
+            else:
+                logger.info("Preprocessed data not found, will preprocess from raw data")
+                return self.load_and_preprocess_data()
             
         except Exception as e:
-            logger.error(f"Error loading data: {str(e)}")
-            raise
+            logger.warning(f"Could not load preprocessed data: {str(e)}")
+            logger.info("Falling back to raw data preprocessing")
+            return self.load_and_preprocess_data()
     
     def load_params(self):
         """Load parameters from params.yaml with error handling"""
         try:
             params_path = 'params.yaml'
             if not os.path.exists(params_path):
-                raise FileNotFoundError(f"Parameters file not found at {params_path}")
+                logger.warning(f"Parameters file not found at {params_path}, using defaults")
+                # Return default parameters
+                return {
+                    'linear_regression': {'fit_intercept': True, 'copy_X': True, 'n_jobs': -1},
+                    'random_forest': {'n_estimators': 100, 'random_state': 42, 'n_jobs': -1},
+                    'gradient_boosting': {'n_estimators': 100, 'learning_rate': 0.1, 'random_state': 42},
+                    'svr': {'kernel': 'rbf', 'C': 1.0, 'gamma': 'scale'}
+                }
                 
             with open(params_path, 'r') as file:
                 params = yaml.safe_load(file)
                 
             if 'model_params' not in params:
-                raise KeyError("'model_params' not found in params.yaml")
+                logger.warning("'model_params' not found in params.yaml, using defaults")
+                return self.load_params()  # Use defaults
                 
             logger.info("Parameters loaded successfully")
             return params['model_params']
@@ -233,22 +300,31 @@ class ModelTrainer:
             return model, metrics
     
     def save_results(self, best_model, best_model_name, best_metrics):
-        """Save model results and metadata"""
+        """Save model results, scaler, and metadata"""
         try:
             # Create models directory
             os.makedirs('models', exist_ok=True)
             
-            # Save best model
+            # Save best model (same as before)
             model_path = 'models/best_model.joblib'
             joblib.dump(best_model, model_path)
             logger.info(f"Best model saved to {model_path}")
+            
+            # Save scaler (new addition - same way as best_model)
+            if self.scaler is not None:
+                scaler_path = 'models/scaler.joblib'
+                joblib.dump(self.scaler, scaler_path)
+                logger.info(f"Scaler saved to {scaler_path}")
+            else:
+                logger.warning("No scaler found to save")
             
             # Save model metadata
             model_metadata = {
                 'best_model': best_model_name,
                 'timestamp': datetime.now().isoformat(),
                 'metrics': best_metrics,
-                'all_results': self.results
+                'all_results': self.results,
+                'scaler_included': self.scaler is not None
             }
             
             metadata_path = 'models/model_metadata.json'
@@ -316,7 +392,7 @@ class ModelTrainer:
             
             logger.info(f"Best model: {best_model_name} with RMSE: {best_metrics['rmse']:.4f}")
             
-            # Save results
+            # Save results (this will now include the scaler)
             self.save_results(best_model, best_model_name, best_metrics)
             
             # Register best model (optional) - can be disabled if causing issues
@@ -435,6 +511,12 @@ def main():
         
         # Print summary
         print(trainer.get_model_comparison_summary())
+        
+        # Print files saved
+        print(f"\n✓ Saved: models/best_model.joblib")
+        print(f"✓ Saved: models/scaler.joblib")
+        print(f"✓ Saved: models/model_metadata.json")
+        print(f"✓ Saved: metrics.json")
         
         logger.info("Model training completed successfully!")
         return trainer
