@@ -55,7 +55,7 @@ fi
 # Copy necessary files
 log_info "Copying deployment files..."
 cp docker-compose.${ENVIRONMENT}.yml ${DEPLOY_DIR}/docker-compose.yml
-cp Dockerfile ${DEPLOY_DIR}/
+cp dockerfile ${DEPLOY_DIR}/
 cp -r monitoring ${DEPLOY_DIR}/
 cp -r src ${DEPLOY_DIR}/
 cp -r models ${DEPLOY_DIR}/
@@ -67,7 +67,7 @@ cd ${DEPLOY_DIR}
 
 # Build and push image
 log_info "Building Docker image: ${IMAGE_NAME}"
-docker build -t ${IMAGE_NAME} -f Dockerfile .
+docker build -t ${IMAGE_NAME} -f dockerfile .
 
 # Check if we should push the image
 if [[ "${ENVIRONMENT}" == "production" ]]; then
