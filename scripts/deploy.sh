@@ -138,7 +138,7 @@ fi
 log_info "Copying deployment files..."
 
 # Since we're running from scripts/ directory, we need to go up one level for other files
-PARENT_DIR=".."
+PARENT_DIR="."
 
 # Verify required files exist before copying (adjust paths for scripts/ folder structure)
 log_info "Verifying required files exist..."
