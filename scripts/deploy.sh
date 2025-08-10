@@ -238,35 +238,55 @@ pip3 install requests 2>/dev/null || python3 -m pip install requests
 
 # Run smoke tests
 log_info "Running smoke tests..."
+
+# Enhanced error handling for CI/CD environments
 python3 -c "
 import requests
 import sys
 import os
+import time
 
 API_PORT = os.environ.get('API_PORT', '8000')
+print(f'Testing health endpoint: http://localhost:{API_PORT}/health')
+
 try:
     response = requests.get(f'http://localhost:{API_PORT}/health', timeout=30)
+    print(f'HTTP Status Code: {response.status_code}')
+    print(f'Response Headers: {dict(response.headers)}')
+    print(f'Response Body: {response.text}')
+    
     if response.status_code == 200:
         print('Smoke tests passed!')
-        print(f'Response: {response.text}')
         sys.exit(0)
     else:
         print(f'Smoke tests failed! API returned status code {response.status_code}')
-        print(f'Response body: {response.text}')
-        print(f'Response headers: {dict(response.headers)}')
         sys.exit(1)
+        
 except requests.exceptions.ConnectionError as e:
     print(f'Smoke tests failed! Connection error: {e}')
     print(f'Could not connect to http://localhost:{API_PORT}/health')
+    print('This usually means:')
+    print('  1. The API container is not running')
+    print('  2. The API is not listening on the expected port')
+    print('  3. There are network connectivity issues')
     sys.exit(1)
+    
 except requests.exceptions.Timeout as e:
     print(f'Smoke tests failed! Timeout error: {e}')
     print(f'Request to http://localhost:{API_PORT}/health timed out after 30 seconds')
+    print('This usually means:')
+    print('  1. The API is overloaded or hung')
+    print('  2. The health endpoint is not responding')
+    print('  3. There are performance issues')
     sys.exit(1)
+    
 except Exception as e:
     print(f'Smoke tests failed! Unexpected error: {e}')
     print(f'Error type: {type(e).__name__}')
     sys.exit(1)
 "
+
+# If we reach here, something unexpected happened
+log_error "Smoke tests completed but script continued unexpectedly"
 
 log_info "Deployment to ${ENVIRONMENT} completed successfully!"
