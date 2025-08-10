@@ -1,6 +1,6 @@
 # scripts/auto_retrain.py
 """
-Automated model retraining system
+Automated model retraining system - Modified for 15-minute intervals
 """
 import schedule
 import time
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class AutoRetrainer:
     def __init__(self):
-        self.retrain_threshold_days = 7
+        self.retrain_threshold_minutes = 15  # Changed from days to minutes
         self.performance_threshold = 0.05  # 5% performance drop
         
     def check_retrain_conditions(self):
@@ -26,10 +26,10 @@ class AutoRetrainer:
                 metadata = json.load(f)
             
             model_timestamp = datetime.fromisoformat(metadata['timestamp'])
-            days_old = (datetime.now() - model_timestamp).days
+            minutes_old = (datetime.now() - model_timestamp).total_seconds() / 60
             
-            if days_old >= self.retrain_threshold_days:
-                logger.info(f"Model is {days_old} days old, triggering retrain")
+            if minutes_old >= self.retrain_threshold_minutes:
+                logger.info(f"Model is {minutes_old:.1f} minutes old, triggering retrain")
                 return True
             
             # Check performance degradation
@@ -106,18 +106,18 @@ class AutoRetrainer:
         logger.info(f"NOTIFICATION: {message}")
     
     def run_scheduler(self):
-        """Run the retraining scheduler"""
-        # Schedule daily checks
-        schedule.every().day.at("02:00").do(self.check_and_retrain)
+        """Run the retraining scheduler - Modified for 15-minute intervals"""
+        # Schedule checks every 15 minutes
+        schedule.every(15).minutes.do(self.check_and_retrain)
         
-        # Schedule weekly forced retrain
-        schedule.every().sunday.at("03:00").do(self.retrain_model)
+        # Optional: Keep a less frequent forced retrain as backup
+        schedule.every().hour.do(self.retrain_model)
         
-        logger.info("Auto-retrainer scheduler started")
+        logger.info("Auto-retrainer scheduler started (15-minute intervals)")
         
         while True:
             schedule.run_pending()
-            time.sleep(60)  # Check every minute
+            time.sleep(30)  # Check every 30 seconds for more responsive scheduling
     
     def check_and_retrain(self):
         """Check conditions and retrain if needed"""
