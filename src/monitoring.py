@@ -4,7 +4,7 @@ import psutil
 import threading
 import time
 import json
-import logging
+from logging import Logger as logger
  
 
 # Custom metrics
