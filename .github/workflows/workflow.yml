@@ -181,6 +181,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
+    - name: Data Preprocessing Training
+      run:
+        python scripts/data_preprocessing.py
+        
     - name: Model Training
       run:
         python scripts/train_models.py
