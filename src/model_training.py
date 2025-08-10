@@ -29,9 +29,9 @@ class ModelTrainer:
     def load_data(self):
         """Load preprocessed data"""
         logger.info("Loading preprocessed data...")
-        
-        train_data = pd.read_csv('data/processed/train_data.csv')
-        test_data = pd.read_csv('data/processed/test_data.csv')
+        logger.info("Current Dir", os.Current.Dir)
+        train_data = pd.read_csv('./data/processed/train_data.csv')
+        test_data = pd.read_csv('./data/processed/test_data.csv')
         
         X_train = train_data.drop('target', axis=1)
         y_train = train_data['target']
