@@ -86,6 +86,73 @@ fi
 
 # Copy necessary files
 log_info "Copying deployment files..."
+
+# Verify required files exist before copying
+log_info "Verifying required files exist..."
+REQUIRED_FILES=(
+    "docker-compose.${ENVIRONMENT}.yml"
+    "requirements.txt"
+    "src/"
+    "models/"
+)
+
+MISSING_FILES=()
+for file in "${REQUIRED_FILES[@]}"; do
+    if [ ! -e "$file" ]; then
+        MISSING_FILES+=("$file")
+    fi
+done
+
+if [ ${#MISSING_FILES[@]} -ne 0 ]; then
+    log_error "Missing required files/directories:"
+    for file in "${MISSING_FILES[@]}"; do
+        log_error "  - $file"
+    done
+    exit 1
+fi
+
+# Check for specific model files that utils.py expects
+log_info "Checking for required model files..."
+MODEL_FILES=(
+    "models/best_model.joblib"
+    "models/scaler.joblib"
+    "models/model_metadata.json"
+)
+
+MISSING_MODELS=()
+for file in "${MODEL_FILES[@]}"; do
+    if [ ! -f "$file" ]; then
+        MISSING_MODELS+=("$file")
+    fi
+done
+
+if [ ${#MISSING_MODELS[@]} -ne 0 ]; then
+    log_warn "Missing model files (will cause API startup failure):"
+    for file in "${MISSING_MODELS[@]}"; do
+        log_warn "  - $file"
+    done
+    log_warn "The API will crash without these files!"
+fi
+
+# Check if utils.py has required functions
+log_info "Validating src/utils.py..."
+if [ ! -f "src/utils.py" ]; then
+    log_error "src/utils.py not found!"
+    exit 1
+fi
+
+# Check if utils.py contains required functions
+REQUIRED_FUNCTIONS=("load_model_and_scaler" "load_model_metadata" "preprocess_input" "validate_input_features" "create_prediction_log")
+for func in "${REQUIRED_FUNCTIONS[@]}"; do
+    if ! grep -q "def $func" src/utils.py; then
+        log_error "Required function '$func' not found in src/utils.py"
+        exit 1
+    fi
+done
+
+log_info "All required functions found in utils.py"
+
+# Now proceed with copying
 cp docker-compose.${ENVIRONMENT}.yml ${DEPLOY_DIR}/docker-compose.yml
 cp ${DOCKERFILE_NAME} ${DEPLOY_DIR}/Dockerfile
 cp -r monitoring ${DEPLOY_DIR}/
@@ -139,9 +206,9 @@ echo "$CONTAINER_STATUS"
 # Check if API container is restarting or has issues
 if echo "$CONTAINER_STATUS" | grep -q "Restarting\|Exited\|Exit"; then
 log_error "========================================="
-log_error "API CONTAINER ISSUE DETECTED"
+log_error "API CONTAINER CRASH DETECTED"
 log_error "========================================="
-log_error "The API container is not running properly."
+log_error "The API container is crashing on startup."
 echo ""
 
 # Get the API service name dynamically
@@ -150,39 +217,70 @@ if [ -z "$API_SERVICE" ]; then
 API_SERVICE="api"  # fallback
 fi
 
-log_error "Recent logs from API container (${API_SERVICE}):"
-${DOCKER_COMPOSE_CMD} logs --tail=100 ${API_SERVICE} || true
+log_error "Full container logs from API (${API_SERVICE}):"
+${DOCKER_COMPOSE_CMD} logs ${API_SERVICE} || true
 echo ""
 
-log_error "Checking for common API startup issues..."
+log_error "Checking for specific issues in your API setup..."
 
-# Check if required files exist in container
-log_error "Verifying file structure in container:"
-docker exec "${API_SERVICE}" ls -la /app/ 2>/dev/null || log_error "Cannot access container filesystem"
-docker exec "${API_SERVICE}" ls -la /app/src/ 2>/dev/null || log_error "src/ directory not found in container"
-docker exec "${API_SERVICE}" ls -la /app/models/ 2>/dev/null || log_error "models/ directory not found in container"
-docker exec "${API_SERVICE}" ls -la /app/logs/ 2>/dev/null || log_error "logs/ directory not found in container"
+# Check if model files exist in container
+log_error "Checking model files in container:"
+docker exec "${API_SERVICE}" ls -la /app/models/ 2>/dev/null || {
+    log_error "Cannot access /app/models/ directory in container"
+    log_error "This is likely why your API is crashing - model files not found"
+}
 
-# Check Python dependencies
-log_error "Checking Python environment in container:"
-docker exec "${API_SERVICE}" python3 -c "import sys; print('Python version:', sys.version)" 2>/dev/null || log_error "Python not accessible in container"
-docker exec "${API_SERVICE}" python3 -c "import fastapi, pydantic, joblib, numpy, pandas, prometheus_client; print('Core dependencies OK')" 2>/dev/null || log_error "Missing Python dependencies"
+# Check specific model files your utils.py expects
+docker exec "${API_SERVICE}" test -f /app/models/best_model.joblib 2>/dev/null || log_error "❌ /app/models/best_model.joblib NOT FOUND"
+docker exec "${API_SERVICE}" test -f /app/models/scaler.joblib 2>/dev/null || log_error "❌ /app/models/scaler.joblib NOT FOUND"
+docker exec "${API_SERVICE}" test -f /app/models/model_metadata.json 2>/dev/null || log_error "❌ /app/models/model_metadata.json NOT FOUND"
 
 # Check if utils module can be imported
-docker exec "${API_SERVICE}" python3 -c "from src.utils import load_model_and_scaler; print('Utils import OK')" 2>/dev/null || log_error "Cannot import src.utils - check if file exists and has correct functions"
+log_error "Testing Python imports in container:"
+docker exec "${API_SERVICE}" python3 -c "
+try:
+    from src.utils import load_model_and_scaler, load_model_metadata, preprocess_input
+    print('✅ src.utils imports successful')
+    
+    # Test model loading
+    model, scaler = load_model_and_scaler()
+    if model is None or scaler is None:
+        print('❌ Model/scaler loading failed - files not found or corrupted')
+        exit(1)
+    else:
+        print('✅ Model and scaler loaded successfully')
+        
+except ImportError as e:
+    print(f'❌ Import error: {e}')
+    exit(1)
+except Exception as e:
+    print(f'❌ Model loading error: {e}')
+    exit(1)
+" 2>/dev/null || log_error "❌ Python import/model loading test failed"
+
+# Check FastAPI startup
+log_error "Testing FastAPI startup:"
+docker exec "${API_SERVICE}" python3 -c "
+try:
+    from src.api import app
+    print('✅ FastAPI app import successful')
+except Exception as e:
+    print(f'❌ FastAPI app import failed: {e}')
+    exit(1)
+" 2>/dev/null || log_error "❌ FastAPI startup test failed"
 
 log_error "========================================="
-log_error "COMMON SOLUTIONS:"
-log_error "1. Check that all required files are copied to the container"
-log_error "2. Verify src/utils.py exists and contains required functions:"
-log_error "   - load_model_and_scaler()"
-log_error "   - load_model_metadata()"
-log_error "   - preprocess_input()"
-log_error "   - validate_input_features()"
-log_error "   - create_prediction_log()"
-log_error "3. Check that models/ directory contains trained models"
-log_error "4. Verify all Python dependencies are in requirements.txt"
-log_error "5. Check file permissions in the container"
+log_error "DIAGNOSIS BASED ON YOUR UTILS.PY:"
+log_error "Your utils.py expects these files:"
+log_error "  - models/best_model.joblib"
+log_error "  - models/scaler.joblib" 
+log_error "  - models/model_metadata.json"
+log_error ""
+log_error "SOLUTIONS:"
+log_error "1. Train your models and save them as .joblib files"
+log_error "2. OR create dummy models for testing (see error details above)"
+log_error "3. Check that models/ directory is properly copied to container"
+log_error "4. Verify file permissions on model files"
 log_error "========================================="
 exit 1
 fi
