@@ -36,6 +36,16 @@ venv.bak/
 *.swp
 *.swo
 
+# MLflow
+mlruns/
+mlartifacts/
+
+# Data files (managed by DVC)
+models/*.pkl
+
+# Logs
+logs/*.log
+
 # Docker
 .dockerignore
 
