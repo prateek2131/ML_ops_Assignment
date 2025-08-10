@@ -10,45 +10,52 @@ NC='\033[0m' # No Color
 DOCKER_USERNAME=${DOCKER_USERNAME:-"prateek2131"}
 
 log_info() {
-echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "${GREEN}[INFO]${NC} $1"
 }
 
 log_warn() {
-echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
 log_error() {
-echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1"
 }
+
+# Set base directory (assuming script is in scripts/ subdirectory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+log_info "Script directory: ${SCRIPT_DIR}"
+log_info "Base directory: ${BASE_DIR}"
 
 # Function to detect docker compose command
 detect_docker_compose() {
-if command -v docker-compose &> /dev/null; then
-echo "docker-compose"
-elif docker compose version &> /dev/null; then
-echo "docker compose"
-else
-log_error "Neither docker-compose nor docker compose found"
-exit 1
-fi
+    if command -v docker-compose &> /dev/null; then
+        echo "docker-compose"
+    elif docker compose version &> /dev/null; then
+        echo "docker compose"
+    else
+        log_error "Neither docker-compose nor docker compose found"
+        exit 1
+    fi
 }
 
 # Function to find dockerfile
 find_dockerfile() {
-if [ -f "Dockerfile" ]; then
-echo "Dockerfile"
-elif [ -f "dockerfile" ]; then
-echo "dockerfile"
-else
-log_error "No Dockerfile found (checked both 'Dockerfile' and 'dockerfile')"
-exit 1
-fi
+    if [ -f "${BASE_DIR}/Dockerfile" ]; then
+        echo "Dockerfile"
+    elif [ -f "${BASE_DIR}/dockerfile" ]; then
+        echo "dockerfile"
+    else
+        log_error "No Dockerfile found in ${BASE_DIR} (checked both 'Dockerfile' and 'dockerfile')"
+        exit 1
+    fi
 }
 
 # Verify required environment variables
 if [ -z "$DOCKER_USERNAME" ]; then
-log_error "DOCKER_USERNAME environment variable is not set"
-exit 1
+    log_error "DOCKER_USERNAME environment variable is not set"
+    exit 1
 fi
 
 ENVIRONMENT="production"
@@ -67,52 +74,63 @@ log_info "Deploying to ${ENVIRONMENT} environment..."
 
 # Create deployment directory
 DEPLOY_DIR="/tmp/housing-api-${ENVIRONMENT}"
+rm -rf ${DEPLOY_DIR}  # Clean up any previous deployment
 mkdir -p ${DEPLOY_DIR}
 
 # Load environment variables from .env.production
-if [ -f ".env.production" ]; then
-log_info "Loading production environment variables..."
-set -a
-source .env.production
-set +a
+if [ -f "${BASE_DIR}/.env.production" ]; then
+    log_info "Loading production environment variables from ${BASE_DIR}/.env.production"
+    set -a
+    source "${BASE_DIR}/.env.production"
+    set +a
 else
-log_warn ".env.production not found, using default values..."
-export API_PORT=8000
-export MLFLOW_PORT=5001
-export PROMETHEUS_PORT=9090
-export GRAFANA_PORT=3000
-export LOG_LEVEL=INFO
+    log_warn ".env.production not found in ${BASE_DIR}, using default values..."
+    export API_PORT=8000
+    export MLFLOW_PORT=5001
+    export PROMETHEUS_PORT=9090
+    export GRAFANA_PORT=3000
+    export LOG_LEVEL=INFO
 fi
 
-# Copy necessary files
-log_info "Copying deployment files..."
-
 # Verify required files exist before copying
-log_info "Verifying required files exist..."
+log_info "Verifying required files exist in ${BASE_DIR}..."
+
 REQUIRED_FILES=(
     "docker-compose.${ENVIRONMENT}.yml"
     "requirements.txt"
     "src/"
-    "models/"
 )
 
 MISSING_FILES=()
 for file in "${REQUIRED_FILES[@]}"; do
-    if [ ! -e "$file" ]; then
-        MISSING_FILES+=("$file")
+    if [ ! -e "${BASE_DIR}/${file}" ]; then
+        MISSING_FILES+=("${file}")
     fi
 done
 
 if [ ${#MISSING_FILES[@]} -ne 0 ]; then
-    log_error "Missing required files/directories:"
+    log_error "Missing required files/directories in ${BASE_DIR}:"
     for file in "${MISSING_FILES[@]}"; do
-        log_error "  - $file"
+        log_error " - ${file}"
     done
+    log_error "Directory contents of ${BASE_DIR}:"
+    ls -la "${BASE_DIR}/"
     exit 1
 fi
 
+# Check for models directory and files
+if [ ! -d "${BASE_DIR}/models" ]; then
+    log_error "models/ directory not found in ${BASE_DIR}"
+    log_error "You need to train your models first!"
+    log_error "Run your training script to generate the required model files."
+    exit 1
+fi
+
+log_info "Models directory found. Checking for required model files..."
+log_info "Files in ${BASE_DIR}/models/:"
+ls -la "${BASE_DIR}/models/"
+
 # Check for specific model files that utils.py expects
-log_info "Checking for required model files..."
 MODEL_FILES=(
     "models/best_model.joblib"
     "models/scaler.joblib"
@@ -121,103 +139,68 @@ MODEL_FILES=(
 
 MISSING_MODELS=()
 for file in "${MODEL_FILES[@]}"; do
-    if [ ! -f "$file" ]; then
-        MISSING_MODELS+=("$file")
+    if [ ! -f "${BASE_DIR}/${file}" ]; then
+        MISSING_MODELS+=("${file}")
     fi
 done
 
 if [ ${#MISSING_MODELS[@]} -ne 0 ]; then
-    log_warn "Missing model files (will cause API startup failure):"
+    log_error "========================================="
+    log_error "CRITICAL: Missing model files!"
+    log_error "========================================="
+    log_error "The following required model files are missing:"
     for file in "${MISSING_MODELS[@]}"; do
-        log_warn "  - $file"
+        log_error " ❌ ${file}"
     done
-    log_warn "The API will crash without these files!"
-fi
-
-# Copy necessary files
-log_info "Copying deployment files..."
-
-# Since we're running from scripts/ directory, we need to go up one level for other files
-PARENT_DIR="."
-
-# Verify required files exist before copying (adjust paths for scripts/ folder structure)
-log_info "Verifying required files exist..."
-REQUIRED_FILES=(
-    "${PARENT_DIR}/docker-compose.${ENVIRONMENT}.yml"
-    "${PARENT_DIR}/requirements.txt"
-    "${PARENT_DIR}/src/"
-    "${PARENT_DIR}/models/"
-)
-
-MISSING_FILES=()
-for file in "${REQUIRED_FILES[@]}"; do
-    if [ ! -e "$file" ]; then
-        MISSING_FILES+=("$file")
-    fi
-done
-
-if [ ${#MISSING_FILES[@]} -ne 0 ]; then
-    log_error "Missing required files/directories:"
-    for file in "${MISSING_FILES[@]}"; do
-        log_error "  - $file"
-    done
-    log_error "Current directory: $(pwd)"
-    log_error "Directory contents: $(ls -la)"
-    log_error "Parent directory contents: $(ls -la ${PARENT_DIR}/)"
+    log_error ""
+    log_error "These files are required by your API (src/utils.py expects them)."
+    log_error ""
+    log_error "SOLUTION:"
+    log_error "1. Run your model training script first:"
+    log_error "   python your_training_script.py"
+    log_error ""
+    log_error "2. Or use the updated training script that generates all required files"
+    log_error ""
+    log_error "The deployment will fail without these files!"
     exit 1
-fi
-
-# Check for specific model files that utils.py expects
-log_info "Checking for required model files..."
-MODEL_FILES=(
-    "${PARENT_DIR}/models/best_model.joblib"
-    "${PARENT_DIR}/models/scaler.joblib"
-    "${PARENT_DIR}/models/model_metadata.json"
-)
-
-MISSING_MODELS=()
-for file in "${MODEL_FILES[@]}"; do
-    if [ ! -f "$file" ]; then
-        MISSING_MODELS+=("$file")
-    fi
-done
-
-if [ ${#MISSING_MODELS[@]} -ne 0 ]; then
-    log_warn "Missing model files (will cause API startup failure):"
-    for file in "${MISSING_MODELS[@]}"; do
-        log_warn "  - $file"
+else
+    log_info "✅ All required model files found"
+    for file in "${MODEL_FILES[@]}"; do
+        SIZE=$(du -h "${BASE_DIR}/${file}" | cut -f1)
+        log_info "  ✅ ${file} (${SIZE})"
     done
-    log_warn "The API will crash without these files!"
-    
-    # Show what files actually exist in models directory
-    log_info "Files actually in models directory:"
-    ls -la ${PARENT_DIR}/models/ || log_error "models/ directory not accessible"
 fi
 
-# Check if utils.py has required functions (adjust path for scripts folder)
-log_info "Validating ${PARENT_DIR}/src/utils.py..."
-if [ ! -f "${PARENT_DIR}/src/utils.py" ]; then
-    log_error "${PARENT_DIR}/src/utils.py not found!"
+# Check if utils.py has required functions
+log_info "Validating ${BASE_DIR}/src/utils.py..."
+if [ ! -f "${BASE_DIR}/src/utils.py" ]; then
+    log_error "${BASE_DIR}/src/utils.py not found!"
     exit 1
 fi
 
 # Check if utils.py contains required functions
 REQUIRED_FUNCTIONS=("load_model_and_scaler" "load_model_metadata" "preprocess_input" "validate_input_features" "create_prediction_log")
+MISSING_FUNCTIONS=()
+
 for func in "${REQUIRED_FUNCTIONS[@]}"; do
-    if ! grep -q "def $func" ${PARENT_DIR}/src/utils.py; then
-        log_error "Required function '$func' not found in src/utils.py"
-        exit 1
+    if ! grep -q "def $func" "${BASE_DIR}/src/utils.py"; then
+        MISSING_FUNCTIONS+=("${func}")
     fi
 done
 
-log_info "All required functions found in utils.py"
+if [ ${#MISSING_FUNCTIONS[@]} -ne 0 ]; then
+    log_error "Required functions missing in src/utils.py:"
+    for func in "${MISSING_FUNCTIONS[@]}"; do
+        log_error " - ${func}"
+    done
+    exit 1
+fi
 
-# Validate and potentially fix Dockerfile
-log_info "Checking Dockerfile structure..."
-if [ -f "${PARENT_DIR}/${DOCKERFILE_NAME}" ]; then
-    # Create a corrected Dockerfile for the deployment
-    log_info "Creating optimized Dockerfile for deployment..."
-    cat > ${DEPLOY_DIR}/Dockerfile << 'EOF'
+log_info "✅ All required functions found in utils.py"
+
+# Create optimized Dockerfile for deployment
+log_info "Creating optimized Dockerfile for deployment..."
+cat > ${DEPLOY_DIR}/Dockerfile << 'EOF'
 FROM python:3.9-slim
 
 # Install system dependencies
@@ -237,8 +220,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code with correct structure
 COPY src/ ./src/
 COPY models/ ./models/
-COPY logs/ ./logs/
-COPY monitoring/ ./monitoring/
 
 # Create logs directory with proper permissions
 RUN mkdir -p /app/logs && chmod 755 /app/logs
@@ -254,38 +235,88 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
 CMD ["python", "-m", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
 EOF
-    
-    log_info "Created corrected Dockerfile with proper paths and working directory"
+
+log_info "Created optimized Dockerfile"
+
+# Copy files to deployment directory
+log_info "Copying deployment files to ${DEPLOY_DIR}..."
+
+# Copy main files
+cp "${BASE_DIR}/docker-compose.${ENVIRONMENT}.yml" "${DEPLOY_DIR}/docker-compose.yml"
+cp "${BASE_DIR}/requirements.txt" "${DEPLOY_DIR}/"
+
+# Copy directories
+cp -r "${BASE_DIR}/src" "${DEPLOY_DIR}/"
+cp -r "${BASE_DIR}/models" "${DEPLOY_DIR}/"
+
+# Copy optional directories/files
+if [ -d "${BASE_DIR}/monitoring" ]; then
+    cp -r "${BASE_DIR}/monitoring" "${DEPLOY_DIR}/"
+    log_info "✅ Copied monitoring/ directory"
 else
-    log_error "Original Dockerfile not found: ${PARENT_DIR}/${DOCKERFILE_NAME}"
+    log_warn "monitoring/ directory not found, skipping..."
+fi
+
+if [ -d "${BASE_DIR}/logs" ]; then
+    cp -r "${BASE_DIR}/logs" "${DEPLOY_DIR}/"
+    log_info "✅ Copied logs/ directory"
+else
+    mkdir -p "${DEPLOY_DIR}/logs"
+    log_info "✅ Created logs/ directory"
+fi
+
+if [ -f "${BASE_DIR}/.env.production" ]; then
+    cp "${BASE_DIR}/.env.production" "${DEPLOY_DIR}/"
+    log_info "✅ Copied .env.production"
+fi
+
+# Verify files were copied correctly
+log_info "Verifying copied files in deployment directory..."
+DEPLOY_VERIFICATION=(
+    "src/api.py"
+    "src/utils.py"
+    "models/best_model.joblib"
+    "models/scaler.joblib"
+    "models/model_metadata.json"
+    "requirements.txt"
+    "docker-compose.yml"
+    "Dockerfile"
+)
+
+ALL_COPIED=true
+for file in "${DEPLOY_VERIFICATION[@]}"; do
+    if [ -f "${DEPLOY_DIR}/${file}" ]; then
+        SIZE=$(du -h "${DEPLOY_DIR}/${file}" | cut -f1)
+        log_info "✅ ${file} (${SIZE})"
+    else
+        log_error "❌ ${file} - NOT COPIED!"
+        ALL_COPIED=false
+    fi
+done
+
+if [ "$ALL_COPIED" = false ]; then
+    log_error "File copying failed! Check the errors above."
     exit 1
 fi
 
-# Copy files from parent directory (since we're in scripts/)
-cp ${PARENT_DIR}/docker-compose.${ENVIRONMENT}.yml ${DEPLOY_DIR}/docker-compose.yml
-# Don't copy the original dockerfile - we created a corrected one above
-cp -r ${PARENT_DIR}/monitoring ${DEPLOY_DIR}/ 2>/dev/null || log_warn "monitoring/ directory not found, skipping..."
-cp -r ${PARENT_DIR}/src ${DEPLOY_DIR}/
-cp -r ${PARENT_DIR}/models ${DEPLOY_DIR}/
-cp -r ${PARENT_DIR}/logs ${DEPLOY_DIR}/ 2>/dev/null || (mkdir -p ${DEPLOY_DIR}/logs && log_info "Created logs directory")
-cp ${PARENT_DIR}/requirements.txt ${DEPLOY_DIR}/
-cp ${PARENT_DIR}/.env.production ${DEPLOY_DIR}/ 2>/dev/null || :
+log_info "✅ All files copied successfully"
 
-cd ${DEPLOY_DIR}
+# Change to deployment directory
+cd "${DEPLOY_DIR}"
 
 # Build and push image
 log_info "Building Docker image: ${IMAGE_NAME}"
-docker build -t ${IMAGE_NAME} .
+docker build -t "${IMAGE_NAME}" .
 
 # Check if we should push the image
 if [[ "${ENVIRONMENT}" == "production" ]]; then
     log_info "Pushing Docker image to registry..."
-    docker push ${IMAGE_NAME}
+    docker push "${IMAGE_NAME}"
 fi
 
 # Stop existing containers
@@ -294,263 +325,67 @@ ${DOCKER_COMPOSE_CMD} down || true
 
 # Start new containers
 log_info "Starting new containers..."
-export DOCKER_IMAGE=${IMAGE_NAME}
+export DOCKER_IMAGE="${IMAGE_NAME}"
 ${DOCKER_COMPOSE_CMD} up -d
 
 # Wait for services to be ready
 log_info "Waiting for services to start..."
 sleep 30
 
-# Health check
+# Health check and remaining script continues as before...
 log_info "Performing health checks..."
-log_info "Checking if port ${API_PORT} is available..."
 
-# Check if port is in use
-if netstat -ln 2>/dev/null | grep ":${API_PORT} " > /dev/null; then
-log_info "Port ${API_PORT} is in use"
-else
-log_warn "Port ${API_PORT} does not appear to be in use"
-fi
-
-# Check container status before health checks
-log_info "Container status before health checks:"
+# Container status check
+log_info "Container status:"
 CONTAINER_STATUS=$(${DOCKER_COMPOSE_CMD} ps)
 echo "$CONTAINER_STATUS"
 
 # Check if API container is restarting or has issues
 if echo "$CONTAINER_STATUS" | grep -q "Restarting\|Exited\|Exit"; then
-log_error "========================================="
-log_error "API CONTAINER CRASH DETECTED"
-log_error "========================================="
-log_error "The API container is crashing on startup."
-echo ""
-
-# Get the API service name dynamically
-API_SERVICE=$(echo "$CONTAINER_STATUS" | grep "api" | awk '{print $1}' | head -1)
-if [ -z "$API_SERVICE" ]; then
-API_SERVICE="api"  # fallback
-fi
-
-log_error "Full container logs from API (${API_SERVICE}):"
-${DOCKER_COMPOSE_CMD} logs ${API_SERVICE} || true
-echo ""
-
-log_error "Checking for specific issues in your API setup..."
-
-# Check if model files exist in container
-log_error "Checking model files in container:"
-docker exec "${API_SERVICE}" ls -la /app/models/ 2>/dev/null || {
-    log_error "Cannot access /app/models/ directory in container"
-    log_error "This is likely why your API is crashing - model files not found"
-}
-
-# Check specific model files your utils.py expects
-docker exec "${API_SERVICE}" test -f /app/models/best_model.joblib 2>/dev/null || log_error "❌ /app/models/best_model.joblib NOT FOUND"
-docker exec "${API_SERVICE}" test -f /app/models/scaler.joblib 2>/dev/null || log_error "❌ /app/models/scaler.joblib NOT FOUND"
-docker exec "${API_SERVICE}" test -f /app/models/model_metadata.json 2>/dev/null || log_error "❌ /app/models/model_metadata.json NOT FOUND"
-
-# Check if utils module can be imported
-log_error "Testing Python imports in container:"
-docker exec "${API_SERVICE}" python3 -c "
-try:
-    from src.utils import load_model_and_scaler, load_model_metadata, preprocess_input
-    print('✅ src.utils imports successful')
+    log_error "========================================="
+    log_error "API CONTAINER CRASH DETECTED"
+    log_error "========================================="
     
-    # Test model loading
-    model, scaler = load_model_and_scaler()
-    if model is None or scaler is None:
-        print('❌ Model/scaler loading failed - files not found or corrupted')
-        exit(1)
-    else:
-        print('✅ Model and scaler loaded successfully')
-        
-except ImportError as e:
-    print(f'❌ Import error: {e}')
-    exit(1)
-except Exception as e:
-    print(f'❌ Model loading error: {e}')
-    exit(1)
-" 2>/dev/null || log_error "❌ Python import/model loading test failed"
-
-# Check FastAPI startup
-log_error "Testing FastAPI startup:"
-docker exec "${API_SERVICE}" python3 -c "
-try:
-    from src.api import app
-    print('✅ FastAPI app import successful')
-except Exception as e:
-    print(f'❌ FastAPI app import failed: {e}')
-    exit(1)
-" 2>/dev/null || log_error "❌ FastAPI startup test failed"
-
-log_error "========================================="
-log_error "DIAGNOSIS BASED ON YOUR UTILS.PY:"
-log_error "Your utils.py expects these files:"
-log_error "  - models/best_model.joblib"
-log_error "  - models/scaler.joblib" 
-log_error "  - models/model_metadata.json"
-log_error ""
-log_error "SOLUTIONS:"
-log_error "1. Train your models and save them as .joblib files"
-log_error "2. OR create dummy models for testing (see error details above)"
-log_error "3. Check that models/ directory is properly copied to container"
-log_error "4. Verify file permissions on model files"
-log_error "========================================="
-exit 1
+    # Get the API service name dynamically
+    API_SERVICE=$(echo "$CONTAINER_STATUS" | grep "api" | awk '{print $1}' | head -1)
+    if [ -z "$API_SERVICE" ]; then
+        API_SERVICE="api" # fallback
+    fi
+    
+    log_error "Container logs from API (${API_SERVICE}):"
+    ${DOCKER_COMPOSE_CMD} logs "${API_SERVICE}" || true
+    exit 1
 fi
 
+# Health endpoint check
 for i in {1..10}; do
-log_info "Health check attempt ${i}/10..."
-
-# More detailed curl with connection info
-HEALTH_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}|TIME_TOTAL:%{time_total}|TIME_CONNECT:%{time_connect}" \
-  --connect-timeout 5 \
-  --max-time 30 \
-  http://localhost:${API_PORT}/health 2>&1)
-
-HTTP_CODE=$(echo "$HEALTH_RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
-TIME_TOTAL=$(echo "$HEALTH_RESPONSE" | grep -o "TIME_TOTAL:[0-9.]*" | cut -d: -f2)
-TIME_CONNECT=$(echo "$HEALTH_RESPONSE" | grep -o "TIME_CONNECT:[0-9.]*" | cut -d: -f2)
-RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed 's/HTTP_CODE:[0-9]*|TIME_TOTAL:[0-9.]*|TIME_CONNECT:[0-9.]*$//')
-
-if [ "$HTTP_CODE" = "200" ]; then
-log_info "API is healthy!"
-log_info "  Response time: ${TIME_TOTAL}s"
-log_info "  Response: ${RESPONSE_BODY}"
-break
-else
-if [ ${i} -eq 10 ]; then
-log_error "========================================="
-log_error "API HEALTH CHECK FAILED - DEBUGGING INFO"
-log_error "========================================="
-log_error "Final health check details:"
-log_error "  HTTP Status Code: ${HTTP_CODE:-'Connection failed'}"
-log_error "  Connection Time: ${TIME_CONNECT:-'N/A'}s"
-log_error "  Total Time: ${TIME_TOTAL:-'N/A'}s"
-log_error "  Response Body: ${RESPONSE_BODY}"
-log_error "  URL: http://localhost:${API_PORT}/health"
-echo ""
-
-# Check if curl had connection issues
-if echo "$HEALTH_RESPONSE" | grep -q "Connection refused"; then
-log_error "DIAGNOSIS: Connection refused - service not listening on port ${API_PORT}"
-elif echo "$HEALTH_RESPONSE" | grep -q "timeout"; then
-log_error "DIAGNOSIS: Request timeout - service may be overloaded or hung"
-elif [ -z "$HTTP_CODE" ]; then
-log_error "DIAGNOSIS: No HTTP response - check if service is running"
-elif [ "$HTTP_CODE" != "200" ]; then
-log_error "DIAGNOSIS: Service responding but returning error status ${HTTP_CODE}"
-fi
-echo ""
-
-# Container status debugging
-log_error "Container status:"
-${DOCKER_COMPOSE_CMD} ps || true
-echo ""
-
-# Check container logs for all services
-log_error "Recent container logs:"
-for service in $(${DOCKER_COMPOSE_CMD} config --services 2>/dev/null || echo "api"); do
-log_error "--- Logs for service: ${service} ---"
-${DOCKER_COMPOSE_CMD} logs --tail=10 ${service} 2>/dev/null || true
-echo ""
+    log_info "Health check attempt ${i}/10..."
+    
+    HEALTH_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}" \
+        --connect-timeout 5 \
+        --max-time 30 \
+        "http://localhost:${API_PORT}/health" 2>&1)
+    
+    HTTP_CODE=$(echo "$HEALTH_RESPONSE" | grep -o "HTTP_CODE:[0-9]*" | cut -d: -f2)
+    RESPONSE_BODY=$(echo "$HEALTH_RESPONSE" | sed 's/HTTP_CODE:[0-9]*$//')
+    
+    if [ "$HTTP_CODE" = "200" ]; then
+        log_info "✅ API is healthy!"
+        log_info "Response: ${RESPONSE_BODY}"
+        break
+    else
+        if [ ${i} -eq 10 ]; then
+            log_error "❌ Health check failed after 10 attempts"
+            log_error "HTTP Status: ${HTTP_CODE:-'Connection failed'}"
+            log_error "Response: ${RESPONSE_BODY}"
+            exit 1
+        else
+            log_warn "⏳ Waiting for API... (attempt ${i}/10)"
+            sleep 10
+        fi
+    fi
 done
 
-# Network and port debugging
-log_error "Network debugging:"
-log_error "Active connections on port ${API_PORT}:"
-netstat -ln 2>/dev/null | grep ":${API_PORT} " || log_error "No connections found on port ${API_PORT}"
-log_error "Docker networks:"
-docker network ls || true
-
-# Resource usage
-log_error "System resources:"
-docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" 2>/dev/null || true
-
-exit 1
-else
-log_warn "Waiting for API to be ready... (attempt ${i}/10)"
-log_warn "  HTTP Status: ${HTTP_CODE:-'Connection failed'}"
-log_warn "  Connection Time: ${TIME_CONNECT:-'N/A'}s"
-if [ -n "$RESPONSE_BODY" ] && [ ${#RESPONSE_BODY} -lt 200 ]; then
-log_warn "  Response: ${RESPONSE_BODY}"
-fi
-fi
-sleep 10
-fi
-done
-
-# Install Python and pip if not already installed (for CI/CD environments)
-if ! command -v python3 &> /dev/null; then
-log_info "Installing Python..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-brew install python3
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-if command -v apt-get &> /dev/null; then
-apt-get update && apt-get install -y python3 python3-pip
-elif command -v yum &> /dev/null; then
-yum install -y python3 python3-pip
-elif command -v apk &> /dev/null; then
-apk add --no-cache python3 py3-pip
-fi
-fi
-fi
-
-# Install required Python package
-log_info "Installing Python dependencies..."
-pip3 install requests 2>/dev/null || python3 -m pip install requests
-
-# Run smoke tests
-log_info "Running smoke tests..."
-
-# Enhanced error handling for CI/CD environments
-python3 -c "
-import requests
-import sys
-import os
-import time
-
-API_PORT = os.environ.get('API_PORT', '8000')
-print(f'Testing health endpoint: http://localhost:{API_PORT}/health')
-
-try:
-    response = requests.get(f'http://localhost:{API_PORT}/health', timeout=30)
-    print(f'HTTP Status Code: {response.status_code}')
-    print(f'Response Headers: {dict(response.headers)}')
-    print(f'Response Body: {response.text}')
-    
-    if response.status_code == 200:
-        print('Smoke tests passed!')
-        sys.exit(0)
-    else:
-        print(f'Smoke tests failed! API returned status code {response.status_code}')
-        sys.exit(1)
-        
-except requests.exceptions.ConnectionError as e:
-    print(f'Smoke tests failed! Connection error: {e}')
-    print(f'Could not connect to http://localhost:{API_PORT}/health')
-    print('This usually means:')
-    print('  1. The API container is not running')
-    print('  2. The API is not listening on the expected port')
-    print('  3. There are network connectivity issues')
-    sys.exit(1)
-    
-except requests.exceptions.Timeout as e:
-    print(f'Smoke tests failed! Timeout error: {e}')
-    print(f'Request to http://localhost:{API_PORT}/health timed out after 30 seconds')
-    print('This usually means:')
-    print('  1. The API is overloaded or hung')
-    print('  2. The health endpoint is not responding')
-    print('  3. There are performance issues')
-    sys.exit(1)
-    
-except Exception as e:
-    print(f'Smoke tests failed! Unexpected error: {e}')
-    print(f'Error type: {type(e).__name__}')
-    sys.exit(1)
-"
-
-# If we reach here, something unexpected happened
-log_error "Smoke tests completed but script continued unexpectedly"
-
-log_info "Deployment to ${ENVIRONMENT} completed successfully!"
+log_info "🎉 Deployment to ${ENVIRONMENT} completed successfully!"
+log_info "API is running at: http://localhost:${API_PORT}"
+log_info "Health check: http://localhost:${API_PORT}/health"
