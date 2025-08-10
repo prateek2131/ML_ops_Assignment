@@ -3,6 +3,9 @@ from prometheus_client import Counter, Histogram, Gauge, Info
 import psutil
 import threading
 import time
+import json
+import logging
+ 
 
 # Custom metrics
 MODEL_ACCURACY = Gauge('model_accuracy', 'Current model accuracy score')
