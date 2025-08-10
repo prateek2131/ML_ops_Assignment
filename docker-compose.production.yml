@@ -23,12 +23,12 @@ services:
   mlflow:
     image: python:3.9-slim
     ports:
-      - "${MLFLOW_PORT}:5002"
+      - "${MLFLOW_PORT}:5001"
     volumes:
       - ./mlruns:/mlruns
     command: >
       sh -c "pip install mlflow && 
-             mlflow server --host 0.0.0.0 --port 5002 --backend-store-uri file:///mlruns"
+             mlflow server --host 0.0.0.0 --port 5001 --backend-store-uri file:///mlruns"
     restart: unless-stopped
 
   prometheus:

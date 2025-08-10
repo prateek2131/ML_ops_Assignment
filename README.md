@@ -94,7 +94,7 @@ ML_ops_Assignment/
 
 2. **Access Services**
    - API: http://localhost:8000
-   - MLflow: http://localhost:5002
+   - MLflow: http://localhost:5001
    - Prometheus: http://localhost:9090
    - Grafana: http://localhost:3000
 
@@ -108,7 +108,7 @@ ML_ops_Assignment/
 
    Production Environment Ports:
    - API: 8000
-   - MLflow: 5002
+   - MLflow: 5001
    - Prometheus: 9090
    - Grafana: 3000
 
@@ -121,7 +121,7 @@ ML_ops_Assignment/
      - System resource monitoring
 
 2. **View MLflow Experiments**
-   - MLflow UI: http://localhost:5002
+   - MLflow UI: http://localhost:5001
    - Track experiments and model versions
    - Compare model performance
 

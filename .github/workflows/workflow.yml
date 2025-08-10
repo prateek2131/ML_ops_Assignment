@@ -137,13 +137,25 @@ jobs:
     
     steps:
     - uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
     
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
     - name: Deploy to production
       run: |
         echo "Deploying to production environment..."
         chmod +x scripts/deploy.sh
         ./scripts/deploy.sh production
-    
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        DOCKER_REGISTRY: docker.io
+        DOCKER_IMAGE_NAME: california-housing-api
     - name: Run integration tests
       run: |
         echo "Running integration tests..."
