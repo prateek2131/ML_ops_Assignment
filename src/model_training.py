@@ -29,7 +29,7 @@ class ModelTrainer:
     def load_data(self):
         """Load preprocessed data"""
         logger.info("Loading preprocessed data...")
-        logger.info("Current Dir", os.Current.Dir)
+        logger.info("Current Dir", os.getcwd())
         train_data = pd.read_csv('./data/processed/train_data.csv')
         test_data = pd.read_csv('./data/processed/test_data.csv')
         
