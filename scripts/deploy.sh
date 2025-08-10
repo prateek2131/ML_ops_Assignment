@@ -134,17 +134,77 @@ if [ ${#MISSING_MODELS[@]} -ne 0 ]; then
     log_warn "The API will crash without these files!"
 fi
 
-# Check if utils.py has required functions
-log_info "Validating src/utils.py..."
-if [ ! -f "src/utils.py" ]; then
-    log_error "src/utils.py not found!"
+# Copy necessary files
+log_info "Copying deployment files..."
+
+# Since we're running from scripts/ directory, we need to go up one level for other files
+PARENT_DIR=".."
+
+# Verify required files exist before copying (adjust paths for scripts/ folder structure)
+log_info "Verifying required files exist..."
+REQUIRED_FILES=(
+    "${PARENT_DIR}/docker-compose.${ENVIRONMENT}.yml"
+    "${PARENT_DIR}/requirements.txt"
+    "${PARENT_DIR}/src/"
+    "${PARENT_DIR}/models/"
+)
+
+MISSING_FILES=()
+for file in "${REQUIRED_FILES[@]}"; do
+    if [ ! -e "$file" ]; then
+        MISSING_FILES+=("$file")
+    fi
+done
+
+if [ ${#MISSING_FILES[@]} -ne 0 ]; then
+    log_error "Missing required files/directories:"
+    for file in "${MISSING_FILES[@]}"; do
+        log_error "  - $file"
+    done
+    log_error "Current directory: $(pwd)"
+    log_error "Directory contents: $(ls -la)"
+    log_error "Parent directory contents: $(ls -la ${PARENT_DIR}/)"
+    exit 1
+fi
+
+# Check for specific model files that utils.py expects
+log_info "Checking for required model files..."
+MODEL_FILES=(
+    "${PARENT_DIR}/models/best_model.joblib"
+    "${PARENT_DIR}/models/scaler.joblib"
+    "${PARENT_DIR}/models/model_metadata.json"
+)
+
+MISSING_MODELS=()
+for file in "${MODEL_FILES[@]}"; do
+    if [ ! -f "$file" ]; then
+        MISSING_MODELS+=("$file")
+    fi
+done
+
+if [ ${#MISSING_MODELS[@]} -ne 0 ]; then
+    log_warn "Missing model files (will cause API startup failure):"
+    for file in "${MISSING_MODELS[@]}"; do
+        log_warn "  - $file"
+    done
+    log_warn "The API will crash without these files!"
+    
+    # Show what files actually exist in models directory
+    log_info "Files actually in models directory:"
+    ls -la ${PARENT_DIR}/models/ || log_error "models/ directory not accessible"
+fi
+
+# Check if utils.py has required functions (adjust path for scripts folder)
+log_info "Validating ${PARENT_DIR}/src/utils.py..."
+if [ ! -f "${PARENT_DIR}/src/utils.py" ]; then
+    log_error "${PARENT_DIR}/src/utils.py not found!"
     exit 1
 fi
 
 # Check if utils.py contains required functions
 REQUIRED_FUNCTIONS=("load_model_and_scaler" "load_model_metadata" "preprocess_input" "validate_input_features" "create_prediction_log")
 for func in "${REQUIRED_FUNCTIONS[@]}"; do
-    if ! grep -q "def $func" src/utils.py; then
+    if ! grep -q "def $func" ${PARENT_DIR}/src/utils.py; then
         log_error "Required function '$func' not found in src/utils.py"
         exit 1
     fi
@@ -152,15 +212,69 @@ done
 
 log_info "All required functions found in utils.py"
 
-# Now proceed with copying
-cp docker-compose.${ENVIRONMENT}.yml ${DEPLOY_DIR}/docker-compose.yml
-cp ${DOCKERFILE_NAME} ${DEPLOY_DIR}/Dockerfile
-cp -r monitoring ${DEPLOY_DIR}/
-cp -r src ${DEPLOY_DIR}/
-cp -r models ${DEPLOY_DIR}/
-cp -r logs ${DEPLOY_DIR}/
-cp requirements.txt ${DEPLOY_DIR}/
-cp .env.production ${DEPLOY_DIR}/ 2>/dev/null || :
+# Validate and potentially fix Dockerfile
+log_info "Checking Dockerfile structure..."
+if [ -f "${PARENT_DIR}/${DOCKERFILE_NAME}" ]; then
+    # Create a corrected Dockerfile for the deployment
+    log_info "Creating optimized Dockerfile for deployment..."
+    cat > ${DEPLOY_DIR}/Dockerfile << 'EOF'
+FROM python:3.9-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code with correct structure
+COPY src/ ./src/
+COPY models/ ./models/
+COPY logs/ ./logs/
+COPY monitoring/ ./monitoring/
+
+# Create logs directory with proper permissions
+RUN mkdir -p /app/logs && chmod 755 /app/logs
+
+# Create non-root user
+RUN useradd -m -u 1001 appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Run the application
+CMD ["python", "-m", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
+EOF
+    
+    log_info "Created corrected Dockerfile with proper paths and working directory"
+else
+    log_error "Original Dockerfile not found: ${PARENT_DIR}/${DOCKERFILE_NAME}"
+    exit 1
+fi
+
+# Copy files from parent directory (since we're in scripts/)
+cp ${PARENT_DIR}/docker-compose.${ENVIRONMENT}.yml ${DEPLOY_DIR}/docker-compose.yml
+# Don't copy the original dockerfile - we created a corrected one above
+cp -r ${PARENT_DIR}/monitoring ${DEPLOY_DIR}/ 2>/dev/null || log_warn "monitoring/ directory not found, skipping..."
+cp -r ${PARENT_DIR}/src ${DEPLOY_DIR}/
+cp -r ${PARENT_DIR}/models ${DEPLOY_DIR}/
+cp -r ${PARENT_DIR}/logs ${DEPLOY_DIR}/ 2>/dev/null || (mkdir -p ${DEPLOY_DIR}/logs && log_info "Created logs directory")
+cp ${PARENT_DIR}/requirements.txt ${DEPLOY_DIR}/
+cp ${PARENT_DIR}/.env.production ${DEPLOY_DIR}/ 2>/dev/null || :
 
 cd ${DEPLOY_DIR}
 
