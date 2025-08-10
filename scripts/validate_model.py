@@ -1,8 +1,8 @@
 import json
 import sys
 import logging
-from src.model_training import ModelTrainer
-
+import requests
+from ML_ops_Assignment.src.monitoring import ModelMonitor
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
