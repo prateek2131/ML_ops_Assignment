@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/prateek/ML_Ops_Assignment/ML_ops_Assignment/mlruns/246374592199754292/627e17eb3edc4470bdbfeeb23ba525c8/artifacts
+end_time: 1754651850130
+entry_point_name: ''
+experiment_id: '246374592199754292'
+lifecycle_stage: active
+run_id: 627e17eb3edc4470bdbfeeb23ba525c8
+run_name: linear_regression
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1754651848089
+status: 3
+tags: []
+user_id: prateek

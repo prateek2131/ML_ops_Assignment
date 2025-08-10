@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/prateek/ML_Ops_Assignment/ML_ops_Assignment/mlruns/246374592199754292/9c2dbaf7874b437cb64b85300c4fd3bb/artifacts
+end_time: 1754840028524
+entry_point_name: ''
+experiment_id: '246374592199754292'
+lifecycle_stage: active
+run_id: 9c2dbaf7874b437cb64b85300c4fd3bb
+run_name: support_vector_regression
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1754840020509
+status: 3
+tags: []
+user_id: prateek

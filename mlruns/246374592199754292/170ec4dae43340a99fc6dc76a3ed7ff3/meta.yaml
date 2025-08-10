@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/prateek/ML_Ops_Assignment/ML_ops_Assignment/mlruns/246374592199754292/170ec4dae43340a99fc6dc76a3ed7ff3/artifacts
+end_time: 1754655818661
+entry_point_name: ''
+experiment_id: '246374592199754292'
+lifecycle_stage: active
+run_id: 170ec4dae43340a99fc6dc76a3ed7ff3
+run_name: random_forest
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1754655812790
+status: 3
+tags: []
+user_id: prateek

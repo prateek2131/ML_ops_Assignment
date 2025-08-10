@@ -1,0 +1,10 @@
+artifact_location: file:///Users/prateek/ML_Ops_Assignment/ML_ops_Assignment/mlruns/246374592199754292/models/m-e17cf277457a4005a89a2122924ff59d/artifacts
+creation_timestamp: 1754652013251
+experiment_id: '246374592199754292'
+last_updated_timestamp: 1754652014595
+model_id: m-e17cf277457a4005a89a2122924ff59d
+model_type: null
+name: model
+source_run_id: 2133e0afa985483a89d7267bbbe821c7
+status: 2
+status_message: null

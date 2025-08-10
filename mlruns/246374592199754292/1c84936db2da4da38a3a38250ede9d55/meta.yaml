@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/prateek/ML_Ops_Assignment/ML_ops_Assignment/mlruns/246374592199754292/1c84936db2da4da38a3a38250ede9d55/artifacts
+end_time: 1754643941084
+entry_point_name: ''
+experiment_id: '246374592199754292'
+lifecycle_stage: active
+run_id: 1c84936db2da4da38a3a38250ede9d55
+run_name: gradient_boosting
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1754643934896
+status: 3
+tags: []
+user_id: prateek
