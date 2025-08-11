@@ -15,6 +15,8 @@ on:
 env:
   DOCKER_IMAGE_NAME: california-housing-api
   DOCKER_REGISTRY: docker.io
+  PYTHON_VERSION: "3.9"
+  DVC_CACHE_DIR: ".dvc/cache"
 
 jobs:
   # IMPORTANT: A condition is added to every existing job
@@ -401,21 +403,19 @@ jobs:
   # =================================================================
   # === NEW JOB FOR AUTOMATED RETRAINING (RUNS ON SCHEDULE) =========
   # =================================================================
-  auto-retrain-and-commit:
-    # This job ONLY runs on a schedule or manual dispatch
+    auto-retrain-and-commit:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          # A token is required to push new model files to the repo
           token: ${{ secrets.PAT }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.9
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Cache pip dependencies
         uses: actions/cache@v3
@@ -425,22 +425,37 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
+      - name: Cache DVC
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.DVC_CACHE_DIR }}
+            data
+            models
+          key: ${{ runner.os }}-dvc-${{ hashFiles('**/*.dvc', '**/dvc.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dvc-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt dvc
+
+      - name: Configure DVC
+        run: |
+          mkdir -p $DVC_CACHE_DIR
+          dvc config cache.dir $DVC_CACHE_DIR
+          dvc pull || echo "No DVC data to pull"
 
       - name: Check for retraining and execute
         id: retrain_check
         run: |
-          # We run the check_and_retrain function just once.
           python -c "
           from scripts.auto_train import AutoRetrainer;
           retrainer = AutoRetrainer();
           if retrainer.check_retrain_conditions():
               print('Retraining conditions met. Starting model retraining.')
               retrainer.retrain_model()
-              # Set an output for the next step to use
               print('::set-output name=retrained::true')
           else:
               print('Retraining conditions not met. No action needed.')
@@ -452,12 +467,11 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add models/best_model.joblib models/model_metadata.json
-          # Only commit if there are actual changes
+          dvc add models
+          dvc push
+          git add models.dvc dvc.lock models/model_metadata.json
           if ! git diff --staged --quiet; then
-            git commit -m "chore(bot): auto-retrain and update model files"
+            git commit -m "chore(bot): auto-retrain and update model files via DVC"
             git push
-            echo "New model committed to the repository."
           else
-            echo "Model was retrained, but no changes were detected in the final model files."
-          fi
+            echo "Model was retrained, but no changes were detected."
