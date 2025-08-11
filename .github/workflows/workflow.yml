@@ -7,7 +7,7 @@ on:
   pull_request:
     branches: [ main ]
   schedule:
-    # Run auto-training weekly (every Sunday at 2 AM UTC)
+    # Run auto-training every 15 minutes
     - cron: '*/15 * * * *'
 
 env:
@@ -70,7 +70,7 @@ jobs:
       continue-on-error: true
     
     - name: Upload bandit results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: bandit-results
@@ -132,7 +132,7 @@ jobs:
         name: codecov-umbrella
     
     - name: Store coverage HTML report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: matrix.python-version == '3.9'
       with:
         name: coverage-report
@@ -175,7 +175,7 @@ jobs:
       continue-on-error: true
     
     - name: Upload safety results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: safety-results
@@ -289,7 +289,7 @@ jobs:
         python scripts/validate_model.py
     
     - name: Store model artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: trained-models
         path: models/
@@ -326,7 +326,7 @@ jobs:
         pip install -r requirements.txt
     
     - name: Download model artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: trained-models
         path: models/
@@ -336,7 +336,7 @@ jobs:
         python scripts/check_model_drift.py
     
     - name: Store drift analysis results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: drift-analysis
         path: logs/drift_*.json
@@ -381,7 +381,7 @@ jobs:
         python scripts/auto_train.py
     
     - name: Store auto-training artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: auto-trained-models-${{ github.run_number }}
         path: |
@@ -421,7 +421,7 @@ jobs:
         pip install -r requirements.txt
     
     - name: Download model artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: trained-models
         path: models/
@@ -431,7 +431,7 @@ jobs:
         python src/ab_testing.py
     
     - name: Store A/B testing results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ab-testing-results
         path: |
@@ -462,7 +462,7 @@ jobs:
         password: ${{ secrets.DOCKER_PASSWORD }}
     
     - name: Download model artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: trained-models
         path: models/
@@ -572,7 +572,7 @@ jobs:
         pytest tests/integration/ -v --html=integration-report.html --self-contained-html
     
     - name: Store integration test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: integration-test-results
@@ -616,7 +616,7 @@ jobs:
         python src/monitoring.py --health-check
     
     - name: Store monitoring configuration
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: monitoring-config
         path: |
