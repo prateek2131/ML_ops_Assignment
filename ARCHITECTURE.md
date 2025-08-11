@@ -3,6 +3,8 @@
 ## Overview
 This project implements a production-grade machine learning pipeline for California housing price prediction, featuring automated training, monitoring, and deployment capabilities.
 
+![Project Workflow](workflow.png)
+
 ## Core Components
 
 ### 1. Data Pipeline
@@ -100,5 +102,3 @@ ML_ops_Assignment/
 - Resource monitoring
 - Performance optimization
 - Batch prediction support
-
-Maintained by: prateek2131

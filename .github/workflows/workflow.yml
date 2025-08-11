@@ -425,27 +425,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Cache DVC
-        uses: actions/cache@v3
-        with:
-          path: |
-            ${{ env.DVC_CACHE_DIR }}
-            data
-            models
-          key: ${{ runner.os }}-dvc-${{ hashFiles('**/*.dvc', '**/dvc.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-dvc-
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt dvc
-
-      - name: Configure DVC
-        run: |
-          mkdir -p $DVC_CACHE_DIR
-          dvc config cache.dir $DVC_CACHE_DIR
-          dvc pull || echo "No DVC data to pull"
 
       - name: Check for retraining and execute
         id: retrain_check
@@ -467,9 +450,6 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          dvc remove train_models
-          dvc add models
-          dvc push
           git add models.dvc dvc.lock models/model_metadata.json
           if ! git diff --staged --quiet; then
             git commit -m "chore(bot): auto-retrain and update model files via DVC"
