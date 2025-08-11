@@ -1,544 +1,463 @@
 # .github/workflows/ci_cd.yml
-name: CI/CD and Scheduled Retraining Pipeline with DVC
+name: CI/CD and Scheduled Retraining Pipeline
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  # ADDED: Triggers for the new retraining job
   schedule:
-    - cron: '0 */6 * * *' # Runs every 6 hours
+    - cron: '*/60 * * * *' # Runs every 6 hours
   workflow_dispatch:
+
 
 env:
   DOCKER_IMAGE_NAME: california-housing-api
   DOCKER_REGISTRY: docker.io
-  PYTHON_VERSION: "3.9"
-  DVC_CACHE_DIR: "/tmp/dvc-cache"
 
 jobs:
-  # =================================================================
-  # === SETUP AND CACHE JOB (SHARED BY MULTIPLE JOBS) =============
-  # =================================================================
-  setup:
-    if: github.event_name != 'schedule'
+  # IMPORTANT: A condition is added to every existing job
+  # to PREVENT it from running on the schedule.
+  setup-and-test:
+    if: github.event_name != 'schedule' # <-- ADDED
     runs-on: ubuntu-latest
-    outputs:
-      cache-hit: ${{ steps.cache-deps.outputs.cache-hit }}
-      python-cache-key: ${{ steps.cache-key.outputs.key }}
-      dvc-cache-key: ${{ steps.dvc-cache-key.outputs.key }}
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Generate cache keys
-        id: cache-key
-        run: |
-          echo "key=${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/requirements.txt') }}" >> $GITHUB_OUTPUT
-      
-      - name: Generate DVC cache key
-        id: dvc-cache-key
-        run: |
-          # Create a cache key based on DVC files and data dependencies
-          HASH=$(find . -name "*.dvc" -o -name "dvc.yaml" -o -name "dvc.lock" | sort | xargs cat | sha256sum | cut -d' ' -f1 || echo "no-dvc-files")
-          echo "key=dvc-cache-v2-${{ runner.os }}-${HASH}" >> $GITHUB_OUTPUT
-      
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Cache pip dependencies
-        id: cache-deps
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ steps.cache-key.outputs.key }}
-          restore-keys: |
-            ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-
-      
-      - name: Install dependencies
-        if: steps.cache-deps.outputs.cache-hit != 'true'
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest-cov flake8 black dvc
-
-  # =================================================================
-  # === DVC SETUP WITH LOCAL STORAGE ===============================
-  # =================================================================
-  dvc-setup:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    needs: setup
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history for DVC
-      
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Restore pip cache
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ needs.setup.outputs.python-cache-key }}
-          restore-keys: |
-            ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-
-      
-      - name: Install DVC
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install dvc
-      
-      - name: Setup DVC cache directory
-        run: |
-          mkdir -p ${{ env.DVC_CACHE_DIR }}
-          echo "DVC_CACHE_DIR=${{ env.DVC_CACHE_DIR }}" >> $GITHUB_ENV
-      
-      - name: Cache DVC files and artifacts
-        uses: actions/cache@v3
-        with:
-          path: |
-            ${{ env.DVC_CACHE_DIR }}
-            .dvc/cache
-            data/
-            models/
-          key: ${{ needs.setup.outputs.dvc-cache-key }}
-          restore-keys: |
-            dvc-cache-v2-${{ runner.os }}-
-      
-      - name: Initialize DVC with local storage
-        run: |
-          # Initialize DVC if not already done
-          if [ ! -f ".dvc/config" ]; then
-            dvc init --no-scm
-            # Set up local remote storage in a dedicated directory
-            mkdir -p dvc-storage
-            dvc remote add -d local-storage ./dvc-storage
-            dvc remote modify local-storage type local
-          fi
-          
-          # Configure DVC to use our cache directory
-          dvc config cache.dir ${{ env.DVC_CACHE_DIR }}
-      
-      - name: Generate sample data if not exists
-        run: |
-          # Create initial data structure if it doesn't exist
-          mkdir -p data/raw data/processed models reports logs
-          
-          # Generate sample data for first run (if needed)
-          if [ ! -f "data/raw/sample_data.csv" ] && [ ! -f "data/raw.dvc" ]; then
-            python -c "import pandas as pd; import numpy as np; from sklearn.datasets import fetch_california_housing; housing = fetch_california_housing(); df = pd.DataFrame(housing.data, columns=housing.feature_names); df['target'] = housing.target; df.to_csv('data/raw/california_housing.csv', index=False); print('Sample data generated')"
-          fi
-      
-      - name: Add data to DVC tracking
-        run: |
-          # Track data with DVC if not already tracked
-          if [ -d "data/raw" ] && [ ! -f "data/raw.dvc" ]; then
-            dvc add data/raw
-            echo "Added data/raw to DVC tracking"
-          fi
-          
-          # Try to pull from local remote (will fail gracefully on first run)
-          dvc pull || echo "No DVC remote data to pull (first run)"
-
-  # =================================================================
-  # === PARALLEL TESTING AND QUALITY CHECKS ========================
-  # =================================================================
-  test-and-lint:
-    if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
-    needs: [setup, dvc-setup]
     strategy:
-      fail-fast: false
       matrix:
-        task: [lint, test, security]
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Restore pip cache
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ needs.setup.outputs.python-cache-key }}
-      
-      - name: Restore DVC cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ${{ env.DVC_CACHE_DIR }}
-            .dvc/cache
-            data/
-            models/
-          key: ${{ needs.setup.outputs.dvc-cache-key }}
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest-cov flake8 black dvc
-      
-      - name: Setup DVC environment
-        run: |
-          mkdir -p ${{ env.DVC_CACHE_DIR }}
-          dvc config cache.dir ${{ env.DVC_CACHE_DIR }}
-      
-      - name: Create necessary directories
-        run: mkdir -p data/processed models logs reports
-      
-      # Conditional steps based on matrix task
-      - name: Lint with flake8 and black
-        if: matrix.task == 'lint'
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-          black --check . || echo "Code formatting issues found. Run 'black .' to fix."
-      
-      - name: Generate test data
-        if: matrix.task == 'test'
-        run: |
-          # Pull DVC data first
-          dvc pull || echo "No DVC data to pull"
-          python src/data_preprocessing.py
-      
-      - name: Run tests with pytest
-        if: matrix.task == 'test'
-        run: |
-          pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
-      
-      - name: Upload coverage to Codecov
-        if: matrix.task == 'test'
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-      
-      - name: Run Trivy vulnerability scanner
-        if: matrix.task == 'security'
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-      
-      - name: Upload Trivy scan results to GitHub Security tab
-        if: matrix.task == 'security'
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
+        python-version: [3.9]
 
-  # =================================================================
-  # === STREAMLINED ML PIPELINE WITH DVC ===========================
-  # =================================================================
-  ml-pipeline:
-    if: github.event_name != 'schedule'
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest-cov flake8 black
+    
+    - name: Create necessary directories
+      run: |
+        mkdir -p data/processed models logs
+    
+    - name: Lint with flake8
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Generate test data
+      run: |
+        python src/data_preprocessing.py
+    
+    - name: Run tests with pytest
+      run: |
+        pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  security-scan:
+    if: github.event_name != 'schedule' # <-- ADDED
     runs-on: ubuntu-latest
-    needs: [test-and-lint, dvc-setup]
+    needs: setup-and-test
+    permissions:
+      actions: write
+      contents: read
+      security-events: write
     
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.PAT || github.token }}
-      
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Restore pip cache
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ needs.setup.outputs.python-cache-key }}
-      
-      - name: Restore DVC cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ${{ env.DVC_CACHE_DIR }}
-            .dvc/cache
-            data/
-            models/
-          key: ${{ needs.setup.outputs.dvc-cache-key }}
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install dvc
-      
-      - name: Setup DVC environment
-        run: |
-          mkdir -p ${{ env.DVC_CACHE_DIR }}
-          dvc config cache.dir ${{ env.DVC_CACHE_DIR }}
-      
-      - name: Pull DVC data
-        run: |
-          dvc pull || echo "No DVC data to pull (might be first run)"
-      
-      - name: Run complete ML pipeline
-        run: |
-          # Data preprocessing
-          echo "🔄 Starting data preprocessing..."
-          python src/data_preprocessing.py
-          
-          # Model training
-          echo "🤖 Starting model training..."
-          python scripts/train_models.py
-          
-          # Model validation
-          echo "✅ Validating model performance..."
-          python scripts/validate_model.py
-          
-          # Model drift check
-          echo "📊 Checking model drift..."
-          python scripts/check_model_drift.py
-          
-          # Update monitoring metrics
-          echo "📈 Updating monitoring metrics..."
-          python src/monitoring.py
-      
-      - name: Initialize A/B testing framework
-        run: |
-          mkdir -p logs
-          python -c "
-          from src.ab_testing import ABTestManager
-          from datetime import datetime, timedelta
-          
-          test_manager = ABTestManager()
-          print('A/B testing database initialized')
-          
-          start_date = datetime.now().isoformat()
-          end_date = (datetime.now() + timedelta(days=30)).isoformat()
-          
-          test_manager.create_test(
-              test_name='model_comparison',
-              variants={'control': 0.8, 'challenger': 0.2},
-              start_date=start_date,
-              end_date=end_date
-          )
-          print('Model comparison A/B test created: 80% control, 20% challenger')
-          "
-      
-      - name: Update DVC tracking and push
-        run: |
-          # Track processed data and models with DVC
-          dvc add data/processed/ || echo "Data already tracked or no changes"
-          dvc add models/ || echo "Models already tracked or no changes" 
-          
-          # Push to local DVC remote
-          dvc push || echo "No new data to push to DVC remote"
-      
-      - name: Commit DVC metadata changes
-        run: |
-          # Configure git for commits
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          
-          # Add DVC files and any new gitignore entries
-          git add -A *.dvc dvc.lock .gitignore 2>/dev/null || echo "No DVC files to add"
-          
-          # Also add model metadata that should be tracked in git
-          git add models/model_metadata.json 2>/dev/null || echo "No model metadata to add"
-          
-          if ! git diff --staged --quiet; then
-            git commit -m "feat: update ML pipeline artifacts and DVC tracking"
-            git push
-            echo "✅ DVC metadata and model artifacts committed to repository."
-          else
-            echo "ℹ️  No DVC changes to commit."
-          fi
+    - uses: actions/checkout@v3
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
 
-  # =================================================================
-  # === OPTIMIZED BUILD AND DEPLOY =================================
-  # =================================================================
-  build-and-deploy:
-    if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
+  data-preprocessing:
+    if: github.event_name != 'schedule' # <-- ADDED
     runs-on: ubuntu-latest
-    needs: ml-pipeline
+    needs: setup-and-test
     
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Data Preprocessing Training
+      run: |
+        python src/data_preprocessing.py
+
+  model-training:
+    if: github.event_name != 'schedule' # <-- ADDED
+    runs-on: ubuntu-latest
+    needs: data-preprocessing
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Data Preprocessing Training
+      run: |
+        python src/data_preprocessing.py
+        
+    - name: Model Training
+      run: |
+        python scripts/train_models.py
+
+  model-performance-validation:
+    if: github.event_name != 'schedule' # <-- ADDED
+    runs-on: ubuntu-latest
+    needs: model-training
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Data Preprocessing Training
+      run: |
+        python src/data_preprocessing.py
+        
+    - name: Model Training
+      run: |
+        python scripts/train_models.py
+
+    - name: Validate model performance
+      run: |
+        python scripts/validate_model.py
+
+  model-drift-check:
+    if: github.event_name != 'schedule' # <-- ADDED
+    runs-on: ubuntu-latest
+    needs: model-performance-validation
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Check model drift
+      run: |
+        python scripts/check_model_drift.py
+    
+    - name: Update monitoring metrics
+      run: |
+        python src/monitoring.py
+
+  monitoring-health-check:
+    if: github.event_name != 'schedule' # <-- ADDED
+    runs-on: ubuntu-latest
+    needs: model-drift-check
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install prometheus-client psutil
+    
+    - name: Run monitoring health check
+      run: |
+        python -c "
+        from src.monitoring import ModelMonitor
+        import time
+        monitor = ModelMonitor()
+        print('Monitoring system initialized successfully')
+        time.sleep(5)
+        print('Health check completed')
+        "
+    
+    - name: Validate monitoring data
+      run: |
+        python -c "
+        import os
+        import json
+        if os.path.exists('models/model_metadata.json'):
+            with open('models/model_metadata.json', 'r') as f:
+                metadata = json.load(f)
+            print(f'Model accuracy: {metadata[\"metrics\"][\"r2\"]}')
+            print(f'Active model: {metadata[\"best_model\"]}')
+            print('Monitoring validation passed')
+        else:
+            print('Warning: model_metadata.json not found')
+        "
+
+  ab-testing-setup:
+    if: github.event_name != 'schedule' # <-- ADDED
+    runs-on: ubuntu-latest
+    needs: monitoring-health-check
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create logs directory
+      run: |
+        mkdir -p logs
+    
+    - name: Initialize A/B testing framework
+      run: |
+        python -c "
+        from src.ab_testing import ABTestManager
+        import os
+        from datetime import datetime, timedelta
+        
+        test_manager = ABTestManager()
+        print('A/B testing database initialized')
+        
+        start_date = datetime.now().isoformat()
+        end_date = (datetime.now() + timedelta(days=30)).isoformat()
+        
+        test_manager.create_test(
+            test_name='model_comparison',
+            variants={'control': 0.8, 'challenger': 0.2},
+            start_date=start_date,
+            end_date=end_date
+        )
+        print('Model comparison A/B test created: 80% control, 20% challenger')
+        
+        for i in range(10):
+            variant = test_manager.get_variant('model_comparison', f'user_{i}')
+            print(f'User {i} assigned to variant: {variant}')
+        "
+    
+    - name: Validate A/B testing setup
+      run: |
+        python -c "
+        from src.ab_testing import ABTestManager, get_model_variant
+        import os
+        
+        if not os.path.exists('logs/ab_tests.db'):
+            raise Exception('A/B testing database not found')
+        print('A/B testing database created successfully')
+        
+        test_manager = ABTestManager()
+        model, variant = get_model_variant(test_manager, 'test_user')
+        print(f'Test user gets model: {model}, variant: {variant}')
+        
+        test_manager.log_test_result(
+            test_name='model_comparison',
+            user_id='test_user',
+            variant=variant,
+            input_data={'test': 'data'},
+            prediction=0.85,
+            response_time=0.2
+        )
+        print('A/B test result logged successfully')
+        
+        results = test_manager.get_test_results('model_comparison')
+        print(f'A/B test results: {results}')
+        print('A/B testing validation completed')
+        "
+
+  build-and-push:
+    if: github.event_name != 'schedule' && github.ref == 'refs/heads/main' # <-- MODIFIED
+    runs-on: ubuntu-latest
+    needs: ab-testing-setup
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy:
+    if: github.event_name != 'schedule' && github.ref == 'refs/heads/main' # <-- MODIFIED
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
       
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-      
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-      
-      - name: Deploy to production
-        run: |
-          echo "🚀 Deploying to production environment..."
-          chmod +x scripts/deploy.sh
-          ./scripts/deploy.sh production
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-          DOCKER_REGISTRY: ${{ env.DOCKER_REGISTRY }}
-          DOCKER_IMAGE_NAME: ${{ env.DOCKER_IMAGE_NAME }}
-      
-      - name: Run integration tests
-        run: |
-          echo "🧪 Running integration tests..."
-          sleep 30
-          python tests/integration_tests.py
+    - name: Set up Docker compose
+      uses: docker/setup-qemu-action@v3
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    - name: Deploy to production
+      run: |
+        echo "Deploying to production environment..."
+        chmod +x scripts/deploy.sh
+        ./scripts/deploy.sh production
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        DOCKER_REGISTRY: docker.io
+        DOCKER_IMAGE_NAME: california-housing-api
+    - name: Run integration tests
+      run: |
+        echo "Running integration tests..."
+        sleep 30
+        python tests/integration_tests.py
 
   # =================================================================
-  # === AUTOMATED RETRAINING WITH DVC (SCHEDULED) ==================
+  # === NEW JOB FOR AUTOMATED RETRAINING (RUNS ON SCHEDULE) =========
   # =================================================================
   auto-retrain-and-commit:
+    # This job ONLY runs on a schedule or manual dispatch
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
-          token: ${{ secrets.PAT || github.token }}
-          fetch-depth: 0
+          # A token is required to push new model files to the repo
+          token: ${{ secrets.PAT }}
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: 3.9
 
       - name: Cache pip dependencies
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-
-
-      - name: Cache DVC artifacts for retraining
-        uses: actions/cache@v3
-        with:
-          path: |
-            ${{ env.DVC_CACHE_DIR }}
-            .dvc/cache
-            data/
-            models/
-          key: dvc-retrain-${{ github.run_id }}
-          restore-keys: |
-            dvc-cache-v2-${{ runner.os }}-
+            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install dvc
-
-      - name: Setup DVC environment for retraining
-        run: |
-          mkdir -p ${{ env.DVC_CACHE_DIR }}
-          dvc config cache.dir ${{ env.DVC_CACHE_DIR }}
-
-      - name: Pull latest data and models from DVC
-        run: |
-          dvc pull || echo "No DVC files to pull"
 
       - name: Check for retraining and execute
         id: retrain_check
         run: |
+          # We run the check_and_retrain function just once.
           python -c "
-          from scripts.auto_train import AutoRetrainer
-          import os
-          
-          retrainer = AutoRetrainer()
+          from scripts.auto_train import AutoRetrainer;
+          retrainer = AutoRetrainer();
           if retrainer.check_retrain_conditions():
-              print('🔄 Retraining conditions met. Starting model retraining.')
+              print('Retraining conditions met. Starting model retraining.')
               retrainer.retrain_model()
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write('retrained=true\n')
+              # Set an output for the next step to use
+              print('::set-output name=retrained::true')
           else:
-              print('ℹ️  Retraining conditions not met. No action needed.')
-              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                  f.write('retrained=false\n')
+              print('Retraining conditions not met. No action needed.')
+              print('::set-output name=retrained::false')
           "
 
-      - name: Update DVC tracking and commit retrained models
+      - name: Commit and push if model was retrained
         if: steps.retrain_check.outputs.retrained == 'true'
         run: |
-          # Add updated models to DVC tracking
-          dvc add models/ || echo "Models already tracked"
-          
-          # Push to DVC remote storage
-          dvc push || echo "No changes to push to DVC remote"
-          
-          # Configure git
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          
-          # Add DVC metadata files and model metadata to git
-          git add models.dvc models/model_metadata.json .gitignore dvc.lock 2>/dev/null || echo "No DVC files to add"
-          
+          git add models/best_model.joblib models/model_metadata.json
+          # Only commit if there are actual changes
           if ! git diff --staged --quiet; then
-            git commit -m "chore(bot): automated model retraining and DVC update
-
-            🤖 Automated retraining completed
-            📊 Model performance metrics updated  
-            🔄 DVC tracking updated for new model artifacts
-            ⏰ Triggered by scheduled workflow"
-            
+            git commit -m "chore(bot): auto-retrain and update model files"
             git push
-            echo "✅ Retrained model committed to repository via DVC."
+            echo "New model committed to the repository."
           else
-            echo "ℹ️  Model was retrained, but no changes detected in DVC metadata."
-          fi
-
-      - name: Create retraining summary
-        if: steps.retrain_check.outputs.retrained == 'true'
-        run: |
-          echo "## 🤖 Automated Retraining Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Model retraining completed successfully" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 New model artifacts stored in DVC" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔄 Repository updated with new model metadata" >> $GITHUB_STEP_SUMMARY
-          echo "- ⏰ Completed at: $(date)" >> $GITHUB_STEP_SUMMARY
-          
-          # Add model performance info if available
-          if [ -f "models/model_metadata.json" ]; then
-            echo "- 📈 Model Performance:" >> $GITHUB_STEP_SUMMARY
-            python -c "
-            import json
-            with open('models/model_metadata.json', 'r') as f:
-                metadata = json.load(f)
-            print(f\"  - R² Score: {metadata.get('metrics', {}).get('r2', 'N/A')}\")
-            print(f\"  - Model Type: {metadata.get('best_model', 'N/A')}\")
-            " >> $GITHUB_STEP_SUMMARY
+            echo "Model was retrained, but no changes were detected in the final model files."
           fi
