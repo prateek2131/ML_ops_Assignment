@@ -235,9 +235,93 @@ jobs:
             print('Warning: model_metadata.json not found')
         "
 
-  build-and-push:
+  ab-testing-setup:
     runs-on: ubuntu-latest
     needs: monitoring-health-check
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create logs directory
+      run: |
+        mkdir -p logs
+    
+    - name: Initialize A/B testing framework
+      run: |
+        python -c "
+        from src.ab_testing import ABTestManager
+        import os
+        from datetime import datetime, timedelta
+        
+        # Initialize A/B test manager
+        test_manager = ABTestManager()
+        print('A/B testing database initialized')
+        
+        # Create a model comparison test
+        start_date = datetime.now().isoformat()
+        end_date = (datetime.now() + timedelta(days=30)).isoformat()
+        
+        test_manager.create_test(
+            test_name='model_comparison',
+            variants={'control': 0.8, 'challenger': 0.2},  # 80/20 split
+            start_date=start_date,
+            end_date=end_date
+        )
+        print('Model comparison A/B test created: 80% control, 20% challenger')
+        
+        # Test variant assignment
+        for i in range(10):
+            variant = test_manager.get_variant('model_comparison', f'user_{i}')
+            print(f'User {i} assigned to variant: {variant}')
+        "
+    
+    - name: Validate A/B testing setup
+      run: |
+        python -c "
+        from src.ab_testing import ABTestManager, get_model_variant
+        import os
+        
+        # Validate database exists
+        if os.path.exists('logs/ab_tests.db'):
+            print('A/B testing database created successfully')
+        else:
+            raise Exception('A/B testing database not found')
+        
+        # Test model variant selection
+        test_manager = ABTestManager()
+        model, variant = get_model_variant(test_manager, 'test_user')
+        print(f'Test user gets model: {model}, variant: {variant}')
+        
+        # Test logging functionality
+        test_manager.log_test_result(
+            test_name='model_comparison',
+            user_id='test_user',
+            variant=variant,
+            input_data={'test': 'data'},
+            prediction=0.85,
+            response_time=0.2
+        )
+        print('A/B test result logged successfully')
+        
+        # Get test results
+        results = test_manager.get_test_results('model_comparison')
+        print(f'A/B test results: {results}')
+        print('A/B testing validation completed')
+        "
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: ab-testing-setup
     if: github.ref == 'refs/heads/main'
     
     steps:
