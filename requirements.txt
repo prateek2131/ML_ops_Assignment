@@ -34,3 +34,4 @@ matplotlib==3.7.2
 seaborn==0.12.2
 plotly==5.15.0
 Pillow==9.5.0          # Image processing
+schedule
