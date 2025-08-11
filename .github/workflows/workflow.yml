@@ -435,7 +435,7 @@ jobs:
         run: |
           # We run the check_and_retrain function just once.
           python -c "
-          from scripts.auto_retrain import AutoRetrainer;
+          from scripts.auto_train import AutoRetrainer;
           retrainer = AutoRetrainer();
           if retrainer.check_retrain_conditions():
               print('Retraining conditions met. Starting model retraining.')
