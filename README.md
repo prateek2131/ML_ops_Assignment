@@ -30,10 +30,11 @@ ML_ops_Assignment/
 
 ## Prerequisites
 
-1. Install required software:
-   - Python 3.9+
-   - Docker and Docker Compose
+1. Ensure you have the following installed:
+   - Docker (20.10.x or higher)
+   - Docker Compose (2.x or higher)
    - Git
+   - Python 3.9 or higher
 
 2. System requirements:
    - Memory: 8GB RAM (minimum)
@@ -95,13 +96,29 @@ ML_ops_Assignment/
 
 ### Local Development
 
-1. **Start Services Locally**
+1. **Clean Up Existing Containers**
    ```bash
-   docker-compose -f docker/docker-compose.yml up -d
+   # Stop and remove existing containers
+   docker-compose down -v
+
+   # Clean up system resources
+   docker system prune -f
+   docker volume prune -f
    ```
 
-2. **Access Services**
+2. **Start Services**
+   ```bash
+   # Build and start all services
+   docker-compose up -d --build
+
+   # Wait for services to initialize
+   sleep 30
+   ```
+   
+3. **Access Services**
    - API: http://localhost:8000
+      - Health Check: http://localhost:8000/health
+      - API Documentation: http://localhost:8000/docs
    - MLflow: http://localhost:5001
    - Prometheus: http://localhost:9090
    - Grafana: http://localhost:3000
