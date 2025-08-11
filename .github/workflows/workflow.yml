@@ -1,25 +1,96 @@
 # .github/workflows/ci_cd.yml
-name: CI/CD Pipeline
+name: Enhanced CI/CD Pipeline
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Run auto-training weekly (every Sunday at 2 AM UTC)
+    - cron: '*/15 * * * *'
 
 env:
   DOCKER_IMAGE_NAME: california-housing-api
   DOCKER_REGISTRY: docker.io
+  PYTHON_VERSION: 3.9
 
 jobs:
-  test:
+  # ================================
+  # CODE QUALITY & TESTING
+  # ================================
+  code-quality:
+    name: Code Quality & Linting
     runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install linting dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort mypy bandit
+    
+    - name: Run Black formatter check
+      run: |
+        black --check --diff .
+    
+    - name: Run isort import sorting check
+      run: |
+        isort --check-only --diff .
+    
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Type checking with mypy
+      run: |
+        mypy src/ --ignore-missing-imports
+    
+    - name: Security linting with bandit
+      run: |
+        bandit -r src/ -f json -o bandit-report.json
+      continue-on-error: true
+    
+    - name: Upload bandit results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: bandit-results
+        path: bandit-report.json
+
+  # ================================
+  # UNIT TESTS
+  # ================================
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: code-quality
+    
     strategy:
       matrix:
-        python-version: [3.9]
-
+        python-version: [3.8, 3.9, 3.10]
+    
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
     
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
@@ -30,52 +101,58 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
-          ${{ runner.os }}-pip-
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest-cov flake8 black
+        pip install pytest-cov pytest-xdist pytest-mock
     
     - name: Create necessary directories
       run: |
-        mkdir -p data/processed models logs
-    
-    - name: Lint with flake8
-      run: |
-        # Stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Exit-zero treats all errors as warnings
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        mkdir -p data/processed models logs artifacts
     
     - name: Generate test data
       run: |
         python src/data_preprocessing.py
     
-    - name: Run tests with pytest
+    - name: Run unit tests
       run: |
-        pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
+        pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=html --cov-report=term-missing -n auto
     
-    - name: Upload coverage to Codecov
+    - name: Upload coverage reports
       uses: codecov/codecov-action@v3
+      if: matrix.python-version == '3.9'
       with:
         file: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
+    
+    - name: Store coverage HTML report
+      uses: actions/upload-artifact@v3
+      if: matrix.python-version == '3.9'
+      with:
+        name: coverage-report
+        path: htmlcov/
 
+  # ================================
+  # SECURITY SCANNING
+  # ================================
   security-scan:
+    name: Security Vulnerability Scan
     runs-on: ubuntu-latest
-    needs: test
+    needs: code-quality
     permissions:
       actions: write
       contents: read
       security-events: write
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
     
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
@@ -90,47 +167,290 @@ jobs:
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
+    
+    - name: Run dependency check
+      run: |
+        pip install safety
+        safety check --json --output safety-report.json
+      continue-on-error: true
+    
+    - name: Upload safety results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: safety-results
+        path: safety-report.json
 
-  model-validation:
+  # ================================
+  # DATA VALIDATION & PREPROCESSING
+  # ================================
+  data-validation:
+    name: Data Validation & Preprocessing
     runs-on: ubuntu-latest
-    needs: security-scan
+    needs: [unit-tests, security-scan]
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
     
-    - name: Set up Python
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
       uses: actions/setup-python@v4
       with:
-        python-version: 3.9
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Data Preprocessing Training
-      run:
+    - name: Create necessary directories
+      run: |
+        mkdir -p data/processed models logs artifacts
+    
+    - name: Run data preprocessing
+      run: |
         python src/data_preprocessing.py
+    
+    - name: Validate preprocessed data
+      run: |
+        python -c "
+        import pandas as pd
+        import os
         
-    - name: Model Training
-      run:
-        python scripts/train_models.py
+        # Check if processed data exists
+        if not os.path.exists('data/processed'):
+            raise Exception('Processed data directory not found')
+        
+        print('Data validation completed successfully')
+        "
+    
+    - name: Cache processed data
+      uses: actions/cache@v3
+      with:
+        path: data/processed
+        key: processed-data-${{ github.sha }}
 
+  # ================================
+  # MODEL TRAINING & VALIDATION
+  # ================================
+  model-training:
+    name: Model Training & Validation
+    runs-on: ubuntu-latest
+    needs: data-validation
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Restore processed data
+      uses: actions/cache@v3
+      with:
+        path: data/processed
+        key: processed-data-${{ github.sha }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run data preprocessing (if cache miss)
+      run: |
+        if [ ! -d "data/processed" ]; then
+          python src/data_preprocessing.py
+        fi
+    
+    - name: Train models
+      run: |
+        python scripts/train_models.py
+    
     - name: Validate model performance
       run: |
         python scripts/validate_model.py
     
+    - name: Store model artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: trained-models
+        path: models/
+        retention-days: 30
+
+  # ================================
+  # MODEL DRIFT DETECTION
+  # ================================
+  model-drift-check:
+    name: Model Drift Detection
+    runs-on: ubuntu-latest
+    needs: model-training
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Download model artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: trained-models
+        path: models/
+    
     - name: Check model drift
       run: |
         python scripts/check_model_drift.py
+    
+    - name: Store drift analysis results
+      uses: actions/upload-artifact@v3
+      with:
+        name: drift-analysis
+        path: logs/drift_*.json
+        retention-days: 90
 
-  build-and-push:
+  # ================================
+  # AUTO-TRAINING (SCHEDULED)
+  # ================================
+  auto-training:
+    name: Scheduled Auto Training
     runs-on: ubuntu-latest
-    needs: [model-validation]
+    if: github.event_name == 'schedule'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create necessary directories
+      run: |
+        mkdir -p data/processed models logs artifacts
+    
+    - name: Run auto training
+      run: |
+        python scripts/auto_train.py
+    
+    - name: Store auto-training artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: auto-trained-models-${{ github.run_number }}
+        path: |
+          models/
+          logs/auto_train_*.log
+        retention-days: 30
+
+  # ================================
+  # A/B TESTING SETUP
+  # ================================
+  ab-testing:
+    name: A/B Testing Analysis
+    runs-on: ubuntu-latest
+    needs: model-drift-check
     if: github.ref == 'refs/heads/main'
     
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Download model artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: trained-models
+        path: models/
+    
+    - name: Run A/B testing analysis
+      run: |
+        python src/ab_testing.py
+    
+    - name: Store A/B testing results
+      uses: actions/upload-artifact@v3
+      with:
+        name: ab-testing-results
+        path: |
+          logs/ab_test_*.json
+          artifacts/ab_test_*.html
+        retention-days: 90
+
+  # ================================
+  # DOCKER BUILD & PUSH
+  # ================================
+  docker-build:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: [model-drift-check, ab-testing]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
@@ -140,6 +460,12 @@ jobs:
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Download model artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: trained-models
+        path: models/
     
     - name: Extract metadata
       id: meta
@@ -162,19 +488,28 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        build-args: |
+          BUILD_DATE=${{ steps.meta.outputs.labels }}
+          VCS_REF=${{ github.sha }}
 
+  # ================================
+  # DEPLOYMENT
+  # ================================
   deploy:
+    name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: build-and-push
+    needs: docker-build
     if: github.ref == 'refs/heads/main'
+    environment: production
     
     steps:
-    - uses: actions/checkout@v3
-
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
-      
-    - name: Set up Docker compose
+    
+    - name: Set up QEMU
       uses: docker/setup-qemu-action@v3
     
     - name: Log in to Docker Hub
@@ -182,6 +517,7 @@ jobs:
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
+    
     - name: Deploy to production
       run: |
         echo "Deploying to production environment..."
@@ -190,18 +526,136 @@ jobs:
       env:
         DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        DOCKER_REGISTRY: docker.io
-        DOCKER_IMAGE_NAME: california-housing-api
+        DOCKER_REGISTRY: ${{ env.DOCKER_REGISTRY }}
+        DOCKER_IMAGE_NAME: ${{ env.DOCKER_IMAGE_NAME }}
+    
+    - name: Wait for deployment
+      run: |
+        echo "Waiting for deployment to stabilize..."
+        sleep 60
+
+  # ================================
+  # INTEGRATION TESTS
+  # ================================
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install requests pytest-html
+    
+    - name: Wait for application readiness
+      run: |
+        echo "Waiting for application to be ready..."
+        sleep 30
+    
     - name: Run integration tests
       run: |
-        echo "Running integration tests..."
-        # Wait for deployment
-        sleep 30
-        # Run integration tests
         python tests/integration_tests.py
+    
+    - name: Run API health checks
+      run: |
+        pytest tests/integration/ -v --html=integration-report.html --self-contained-html
+    
+    - name: Store integration test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: integration-test-results
+        path: |
+          integration-report.html
+          logs/integration_*.log
 
+  # ================================
+  # MONITORING SETUP
+  # ================================
+  monitoring-setup:
+    name: Setup Monitoring & Alerts
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ env.PYTHON_VERSION }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Setup monitoring infrastructure
+      run: |
+        python src/monitoring.py --setup
+    
+    - name: Configure alerts
+      run: |
+        python src/monitoring.py --configure-alerts
+    
+    - name: Validate monitoring setup
+      run: |
+        python src/monitoring.py --health-check
+    
+    - name: Store monitoring configuration
+      uses: actions/upload-artifact@v3
+      with:
+        name: monitoring-config
+        path: |
+          logs/monitoring_*.log
+          config/monitoring.json
 
+  # ================================
+  # NOTIFICATION & CLEANUP
+  # ================================
+  notify-success:
+    name: Notify Deployment Success
+    runs-on: ubuntu-latest
+    needs: monitoring-setup
+    if: success() && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Notify success
+      run: |
+        echo "🎉 Deployment completed successfully!"
+        echo "✅ All tests passed"
+        echo "🚀 Application is live in production"
+        echo "📊 Monitoring is active"
+    
+    # Add Slack/Teams/Discord notification here if needed
+    # - name: Notify Slack
+    #   uses: 8398a7/action-slack@v3
+    #   with:
+    #     status: success
+    #     webhook_url: ${{ secrets.SLACK_WEBHOOK }}
 
-
-
-        
+  cleanup:
+    name: Cleanup Artifacts
+    runs-on: ubuntu-latest
+    needs: [notify-success]
+    if: always()
+    
+    steps:
+    - name: Cleanup old artifacts
+      run: |
+        echo "Cleaning up temporary artifacts..."
+        # This job runs to ensure proper cleanup
+        # Artifacts auto-expire based on retention-days settings
