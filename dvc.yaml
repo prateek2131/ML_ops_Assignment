@@ -3,22 +3,35 @@ stages:
     cmd: python src/data_preprocessing.py
     deps:
     - src/data_preprocessing.py
+    - data/raw/
     outs:
-    - data/raw/california_housing_raw.csv
-    - data/processed/train_data.csv
-    - data/processed/test_data.csv
-    - models/scaler.joblib
+    - data/processed/
     
-  model_training:
+  train_models:
     cmd: python scripts/train_models.py
     deps:
-    - src/model_training.py
-    - data/processed/train_data.csv
-    - data/processed/test_data.csv
-    - models/scaler.joblib
-    params:
-    - model_params
+    - scripts/train_models.py
+    - data/processed/
     outs:
     - models/best_model.joblib
+    - models/model_metadata.json
+    params:
+    - params.yaml:train_params
+    
+  validate_model:
+    cmd: python scripts/validate_model.py
+    deps:
+    - scripts/validate_model.py
+    - models/best_model.joblib
+    - data/processed/
     metrics:
     - metrics.json
+    
+  check_drift:
+    cmd: python scripts/check_model_drift.py
+    deps:
+    - scripts/check_model_drift.py
+    - models/best_model.joblib
+    - data/processed/
+    outs:
+    - reports/drift_report.json

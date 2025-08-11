@@ -1,0 +1,9 @@
+[core]
+    analytics = false
+    autostage = true
+    remote = gdrive
+
+['remote "gdrive"']
+    url = gdrive://your-google-drive-folder-id
+    gdrive_acknowledge_abuse = true
+    gdrive_use_service_account = true

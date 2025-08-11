@@ -53,3 +53,10 @@ logs/*.log
 # OS
 .DS_Store
 Thumbs.db
+
+# DVC cache
+.dvc/cache
+.dvc/tmp
+.dvc/state
+.dvc/state-journal
+.dvc/state-wal
