@@ -467,6 +467,7 @@ jobs:
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          dvc remove train_models
           dvc add models
           dvc push
           git add models.dvc dvc.lock models/model_metadata.json

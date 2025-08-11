@@ -1,6 +1,14 @@
 # California Housing MLOps Project
 
 This project implements an end-to-end MLOps pipeline for the California Housing dataset, including model training, monitoring, and deployment in a production environment.
+## Developers and Contributions
+
+| Enrollment No. | Name                | Contribution (%) |
+|----------------|---------------------|------------------|
+| 2023ac05351    | Prateek Sanghi       | 100%              |
+| 2023ac05525    | Divanshu Verma       | 100%              |
+| 2023ac05300    | Jasman Arora         | 100%              |
+| 2023ac05306    | Shaik Ahmed Nashith  | 100%              |
 
 ## Project Structure
 
@@ -143,9 +151,7 @@ ML_ops_Assignment/
 
 2. **Make Predictions**
    ```bash
-   curl -X POST http://localhost:8000/predict \
-     -H "Content-Type: application/json" \
-     -d '{"MedInc": 8.3252, "HouseAge": 41.0, "AveRooms": 6.984127, "AveBedrms": 1.023810, "Population": 322.0, "AveOccup": 2.555556, "Latitude": 37.88, "Longitude": -122.23}'
+   curl -X POST http://localhost:8000/predict      -H "Content-Type: application/json"      -d '{"MedInc": 8.3252, "HouseAge": 41.0, "AveRooms": 6.984127, "AveBedrms": 1.023810, "Population": 322.0, "AveOccup": 2.555556, "Latitude": 37.88, "Longitude": -122.23}'
    ```
 
 ## Troubleshooting
