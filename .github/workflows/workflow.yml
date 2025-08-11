@@ -131,20 +131,7 @@ jobs:
           
           # Generate sample data for first run (if needed)
           if [ ! -f "data/raw/sample_data.csv" ] && [ ! -f "data/raw.dvc" ]; then
-            python -c "
-            import pandas as pd
-            import numpy as np
-            from sklearn.datasets import fetch_california_housing
-            
-            # Generate sample data
-            housing = fetch_california_housing()
-            df = pd.DataFrame(housing.data, columns=housing.feature_names)
-            df['target'] = housing.target
-            
-            # Save to data directory
-            df.to_csv('data/raw/california_housing.csv', index=False)
-            print('Sample data generated')
-            "
+            python -c "import pandas as pd; import numpy as np; from sklearn.datasets import fetch_california_housing; housing = fetch_california_housing(); df = pd.DataFrame(housing.data, columns=housing.feature_names); df['target'] = housing.target; df.to_csv('data/raw/california_housing.csv', index=False); print('Sample data generated')"
           fi
       
       - name: Add data to DVC tracking
