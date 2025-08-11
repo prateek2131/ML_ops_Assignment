@@ -12,7 +12,7 @@ env:
   DOCKER_REGISTRY: docker.io
 
 jobs:
-  test:
+  setup-and-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -68,6 +68,7 @@ jobs:
 
   security-scan:
     runs-on: ubuntu-latest
+    needs: setup-and-test
     permissions:
       actions: write
       contents: read
@@ -92,6 +93,7 @@ jobs:
 
   data-preprocessing:
     runs-on: ubuntu-latest
+    needs: setup-and-test
     
     steps:
     - uses: actions/checkout@v3
@@ -112,6 +114,7 @@ jobs:
 
   model-training:
     runs-on: ubuntu-latest
+    needs: data-preprocessing
     
     steps:
     - uses: actions/checkout@v3
@@ -136,6 +139,7 @@ jobs:
 
   model-performance-validation:
     runs-on: ubuntu-latest
+    needs: model-training
     
     steps:
     - uses: actions/checkout@v3
@@ -164,6 +168,7 @@ jobs:
 
   model-drift-check:
     runs-on: ubuntu-latest
+    needs: model-performance-validation
     
     steps:
     - uses: actions/checkout@v3
@@ -184,6 +189,7 @@ jobs:
 
   build-and-push:
     runs-on: ubuntu-latest
+    needs: model-drift-check
     if: github.ref == 'refs/heads/main'
     
     steps:
