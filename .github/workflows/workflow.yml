@@ -403,7 +403,7 @@ jobs:
   # =================================================================
   # === NEW JOB FOR AUTOMATED RETRAINING (RUNS ON SCHEDULE) =========
   # =================================================================
-    auto-retrain-and-commit:
+  auto-retrain-and-commit:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
