@@ -1,6 +1,6 @@
 {
   "best_model": "gradient_boosting",
-  "timestamp": "2025-08-11T13:57:01.595070",
+  "timestamp": "2025-08-11T14:09:56.536281",
   "metrics": {
     "rmse": 0.4791760069129563,
     "mae": 0.31874612175344014,
