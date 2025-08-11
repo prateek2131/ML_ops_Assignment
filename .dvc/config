@@ -1,9 +1,7 @@
 [core]
     analytics = false
     autostage = true
-    remote = gdrive
+    remote = local-storage
 
-['remote "gdrive"']
-    url = gdrive://your-google-drive-folder-id
-    gdrive_acknowledge_abuse = true
-    gdrive_use_service_account = true
+['remote "local-storage"']
+    url = ./dvc-storage
