@@ -8,7 +8,7 @@ on:
     branches: [ main ]
   # ADDED: Triggers for the new retraining job
   schedule:
-    - cron: '*/60 * * * *' # Runs every 6 hours
+  - cron: '0 0 * * *' # Runs once a day at 00:00 UTC
   workflow_dispatch:
 
 
